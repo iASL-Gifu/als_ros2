@@ -1,0 +1,14 @@
+<!-- classifier_dataset_generator.launch -->
+<launch >
+     <arg name="yaml_file" default="$(find-pkg-share als_ros2)/config/classifier_dataset_generator.yaml" />
+
+     <!-- Map server node -->
+     <include file="$(find-pkg-share als_ros2)/launch/map_server.launch.xml">
+     </include>
+
+     <!-- Learning node -->
+     <!-- 信頼度を推定する分類器の学習データ生成 -->
+     <node pkg="als_ros2" name="classifier_dataset_generator" exec="classifier_dataset_generator" output="screen">
+          <param from="$(var yaml_file)" />
+     </node>
+</launch >

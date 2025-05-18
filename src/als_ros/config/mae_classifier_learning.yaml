@@ -1,0 +1,9 @@
+/**:
+  ros__parameters:
+    classifier_dir: "/home/apollo-22/als_ros2/src/als_ros/classifiers/MAE/gifu_univ_7th/"
+    train_dirs:
+      - "/tmp/classifier_dataset/gifu_univ_7th"
+    test_dirs:
+      - "/tmp/classifier_dataset/gifu_univ_7th"
+    max_residual_error: 1.0
+    histrogram_bin_width: 0.025

@@ -20,7 +20,7 @@
 #ifndef __ISM_H__
 #define __ISM_H__
 
-#include <sensor_msgs/PointCloud2.h>
+#include <sensor_msgs/msg/point_cloud2.hpp>
 #include <pcl/io/pcd_io.h>
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
@@ -70,7 +70,7 @@ public:
         // std::cout << "ISM image file path is " << ismFilePath << std::endl;
         cv::Mat ismImage = cv::imread(ismFilePath.c_str(), 1);
         if (ismImage.empty()) {
-            ROS_ERROR("Could not read the ISM image -> %s", ismFilePath.c_str());
+            RCLCPP_ERROR(rclcpp::get_logger("ISM"), "Could not read the ISM image: %s", ismFilePath.c_str());
             exit(1);
         }
         mapWidth_ = ismImage.cols;
@@ -133,8 +133,8 @@ public:
         }
     }
 
-    inline sensor_msgs::PointCloud2 getISMPointsAsPC2(void) {
-        sensor_msgs::PointCloud2 ismPointsMsg;
+    inline sensor_msgs::msg::PointCloud2 getISMPointsAsPC2(void) {
+        sensor_msgs::msg::PointCloud2 ismPointsMsg;
         pcl::toROSMsg(*ismPoints_.get(), ismPointsMsg);
         return ismPointsMsg;
     }

@@ -1,0 +1,74 @@
+<!-- mcl.launch -->
+<launch>
+    <arg name="yaml_file" default="$(find-pkg-share als_ros2)/config/mcl.yaml" />
+
+    <arg name="map_name" default="/map" />
+    <arg name="scan_name" default="/scan" />
+    <arg name="odom_name" default="/odom" />
+    <arg name="gl_sampled_poses_name" default="/gl_sampled_poses" />
+    <arg name="local_map_name" default="/gl_local_map" />
+    <arg name="sdf_keypoints_name" default="/gl_sdf_keypoints" />
+    <arg name="local_sdf_keypoints_name" default="/gl_local_sdf_keypoints" />
+    <arg name="map_frame" default="map" />
+    <arg name="odom_frame" default="odom" />
+    <arg name="base_link_frame" default="base_link" />
+    <arg name="laser_frame" default="laser" />
+    <arg name="residual_errors_name" default="/residual_errors" />
+    <arg name="marker_frame" default="base_link" />
+    <arg name="use_gl_pose_sampler" default="false" />
+    <arg name="use_mrf_failure_detector" default="false" />
+
+    <!-- static tf publisher -->
+    <include file="$(find-pkg-share als_ros2)/launch/robot_tf.launch.py">
+    </include>
+
+    <!-- Map server node -->
+    <include file="$(find-pkg-share als_ros2)/launch/map_server.launch.xml">
+        <arg name="map_name" value="gifu_univ_7th" />
+    </include>
+
+    <!-- 初期位置を明示的に設定できる場合や室内などの狭く閉じた環境で再ローカライズの必要性が低いときは使用しなくていい -->
+    <group if="$(var use_gl_pose_sampler)">
+        <include file="$(find-pkg-share als_ros2)/launch/gl_pose_sampler.launch.xml">
+            <arg name="map_name" value="$(var map_name)" />
+            <arg name="scan_name" value="$(var scan_name)" />
+            <arg name="odom_name" value="$(var odom_name)" />
+
+            <arg name="poses_name" value="$(var gl_sampled_poses_name)" />
+            <arg name="local_map_name" value="$(var local_map_name)" />
+            <arg name="sdf_keypoints_name" value="$(var sdf_keypoints_name)" />
+            <arg name="local_sdf_keypoints_name" value="$(var local_sdf_keypoints_name)" />
+
+            <arg name="map_frame" value="$(var map_frame)" />
+            <arg name="odom_frame" value="$(var odom_frame)" />
+            <arg name="base_link_frame" value="$(var base_link_frame)" />
+            <arg name="laser_frame" value="$(var laser_frame)" />
+        </include>
+    </group>
+
+    <!-- 自己位置推定の精度が落ちたときになにかしらの処理をしたいなら必要 -->
+    <group if="$(var use_mrf_failure_detector)">
+        <include file="$(find-pkg-share als_ros2)/launch/mrf_failure_detector.launch.xml">
+            <arg name="residual_errors_name" value="$(var residual_errors_name)" />
+            <arg name="marker_frame" value="$(var base_link_frame)" />
+        </include>
+    </group>
+
+    <!-- MCL node -->
+    <node pkg="als_ros2" name="mcl" exec="mcl" output="screen">
+        <param from="$(var yaml_file)" />
+        <param name="map_name" value="$(var map_name)" />
+        <param name="scan_name" value="$(var scan_name)" />
+        <param name="odom_name" value="$(var odom_name)" />
+        <param name="poses_name" value="$(var gl_sampled_poses_name)" />
+        <param name="local_map_name" value="$(var local_map_name)" />
+        <param name="sdf_keypoints_name" value="$(var sdf_keypoints_name)" />
+        <param name="local_sdf_keypoints_name" value="$(var local_sdf_keypoints_name)" />
+        <param name="map_frame" value="$(var map_frame)" />
+        <param name="odom_frame" value="$(var odom_frame)" />
+        <param name="base_link_frame" value="$(var base_link_frame)" />
+        <param name="laser_frame" value="$(var laser_frame)" />
+        <param name="residual_errors_name" value="$(var residual_errors_name)" />
+        <param name="marker_frame" value="$(var base_link_frame)" />
+    </node>
+</launch>

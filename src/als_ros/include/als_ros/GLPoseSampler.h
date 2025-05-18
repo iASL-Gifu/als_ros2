@@ -23,17 +23,32 @@
 #ifndef __GL_POSE_SAMPLER_H__
 #define __GL_POSE_SAMPLER_H__
 
-#include <ros/ros.h>
-#include <tf/tf.h>
-#include <sensor_msgs/LaserScan.h>
-#include <nav_msgs/OccupancyGrid.h>
-#include <nav_msgs/Odometry.h>
-#include <geometry_msgs/PoseArray.h>
-#include <tf/transform_broadcaster.h>
-#include <tf/transform_listener.h>
-#include <visualization_msgs/Marker.h>
+// #include <ros/ros.h>
+// #include <tf/tf.h>
+// #include <sensor_msgs/LaserScan.h>
+// #include <nav_msgs/OccupancyGrid.h>
+// #include <nav_msgs/Odometry.h>
+// #include <geometry_msgs/PoseArray.h>
+// #include <tf/transform_broadcaster.h>
+// #include <tf/transform_listener.h>
+// #include <visualization_msgs/Marker.h>
+// #include <opencv2/opencv.hpp>
+// #include <als_ros/Pose.h>
+
+#include <rclcpp/rclcpp.hpp>
+#include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <geometry_msgs/msg/pose_array.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
+#include <nav_msgs/msg/occupancy_grid.hpp>
+#include <nav_msgs/msg/odometry.hpp>
+#include <visualization_msgs/msg/marker.hpp>
 #include <opencv2/opencv.hpp>
 #include <als_ros/Pose.h>
+
 
 namespace als_ros {
 
@@ -61,11 +76,11 @@ public:
     Keypoint(int u, int v, double x, double y, char type):
         u_(u), v_(v), x_(x), y_(y), type_(type) {}
 
-    inline int getU(void) { return u_; }
-    inline int getV(void) { return v_; }
-    inline double getX(void) { return x_; }
-    inline double getY(void) { return y_; }
-    inline char getType(void) { return type_; }
+    inline int getU(void) const { return u_; }
+    inline int getV(void) const { return v_; }
+    inline double getX(void) const { return x_; }
+    inline double getY(void) const { return y_; }
+    inline char getType(void) const { return type_; }
 
     inline void setU(int u) { u_ = u; }
     inline void setV(int v) { v_ = v; }
@@ -88,19 +103,28 @@ public:
         averageSDF_(averageSDF),
         relativeOrientationHist_(relativeOrientationHist) {}
 
-    inline double getDominantOrientation(void) { return dominantOrientation_; }
-    inline double getAverageSDF(void) { return averageSDF_; }
-    std::vector<int> getRelativeOrientationHist(void) { return relativeOrientationHist_; }
-    int getRelativeOrientationHist(int idx) { return relativeOrientationHist_[idx]; }
+    inline double getDominantOrientation(void) const { return dominantOrientation_; }
+    inline double getAverageSDF(void) const { return averageSDF_; }
+    std::vector<int> getRelativeOrientationHist(void) const { return relativeOrientationHist_; }
+    int getRelativeOrientationHist(int idx) const { return relativeOrientationHist_[idx]; }
 }; // class SDFOrientationFeature
 
-class GLPoseSampler {
+class GLPoseSampler : public rclcpp::Node{
 private:
-    ros::NodeHandle nh_;
+    std::string mapName_;
+    rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr mapSub_;
 
-    std::string mapName_, scanName_, odomName_, posesName_, localMapName_, sdfKeypointsName_, localSDFKeypointsName_;
-    ros::Subscriber mapSub_, scanSub_, odomSub_;
-    ros::Publisher posesPub_, localMapPub_, sdfKeypointsPub_, localSDFKeypointsPub_;
+    std::string odomName_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odomSub_;
+
+    std::string scanName_;
+    rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scanSub_;
+
+    std::string posesName_, localMapName_, sdfKeypointsName_, localSDFKeypointsName_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr posesPub_;
+    rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr localMapPub_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr sdfKeypointsPub_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr localSDFKeypointsPub_;
 
     std::string mapFrame_, odomFrame_, baseLinkFrame_, laserFrame_;
     Pose baseLink2Laser_;
@@ -111,9 +135,9 @@ private:
     std::vector<signed char> mapData_;
     bool gotMap_;
 
-    sensor_msgs::LaserScan scan_;
+    sensor_msgs::msg::LaserScan scan_;
     double keyScanIntervalDist_, keyScanIntervalYaw_;
-    std::vector<sensor_msgs::LaserScan> keyScans_;
+    std::vector<sensor_msgs::msg::LaserScan> keyScans_;
     int keyScansNum_;
 
     Pose odomPose_;
@@ -122,7 +146,7 @@ private:
 
     std::vector<Keypoint> sdfKeypoints_;
     std::vector<SDFOrientationFeature> sdfOrientationFeatures_;
-    visualization_msgs::Marker sdfKeypointsMarker_;
+    visualization_msgs::msg::Marker sdfKeypointsMarker_;
 
     double gradientSquareTH_;
     double keypointsMinDistFromMap_;
@@ -132,12 +156,12 @@ private:
     int randomSamplesNum_;
     double positionalRandomNoise_, angularRandomNoise_, matchingRateTH_;
 
-    tf::TransformBroadcaster tfBroadcaster_;
-    tf::TransformListener tfListener_;
+    std::shared_ptr<tf2_ros::TransformBroadcaster> tfBroadcaster_;
+    std::shared_ptr<tf2_ros::TransformListener> tfListener_;
+    std::shared_ptr<tf2_ros::Buffer> tfBuffer_;
 
 public:
-    GLPoseSampler(void):
-        nh_("~"),
+    GLPoseSampler(void) : Node("gl_pose_sampler"),
         mapName_("/map"),
         scanName_("/scan"),
         odomName_("/odom"),
@@ -163,111 +187,189 @@ public:
         angularRandomNoise_(0.3),
         matchingRateTH_(0.1),
         gotMap_(false),
-        gotOdom_(false),
-        tfListener_()
+        gotOdom_(false)
     {
-        nh_.param("map_name", mapName_, mapName_);
-        nh_.param("scan_name", scanName_, scanName_);
-        nh_.param("odom_name", odomName_, odomName_);
-        nh_.param("poses_name", posesName_, posesName_);
-        nh_.param("local_map_name", localMapName_, localMapName_);
-        nh_.param("sdf_keypoints_name", sdfKeypointsName_, sdfKeypointsName_);
-        nh_.param("local_sdf_keypoints_name", localSDFKeypointsName_, localSDFKeypointsName_);
-        nh_.param("map_frame", mapFrame_, mapFrame_);
-        nh_.param("odom_frame", odomFrame_, odomFrame_);
-        nh_.param("base_link_frame", baseLinkFrame_, baseLinkFrame_);
-        nh_.param("laser_frame", laserFrame_, laserFrame_);
-        nh_.param("key_scans_num", keyScansNum_, keyScansNum_);
-        nh_.param("key_scan_interval_dist", keyScanIntervalDist_, keyScanIntervalDist_);
-        nh_.param("key_scan_interval_yaw", keyScanIntervalYaw_, keyScanIntervalYaw_);
-        nh_.param("gradient_square_th", gradientSquareTH_, gradientSquareTH_);
-        nh_.param("keypoints_min_dist_from_map", keypointsMinDistFromMap_, keypointsMinDistFromMap_);
-        nh_.param("sdf_feature_window_size", sdfFeatureWindowSize_, sdfFeatureWindowSize_);
-        nh_.param("average_sdf_delta_th", averageSDFDeltaTH_, averageSDFDeltaTH_);
-        nh_.param("add_random_samples", addRandomSamples_, addRandomSamples_);
-        nh_.param("add_opposite_samples", addOppositeSamples_, addOppositeSamples_);
-        nh_.param("random_samples_num", randomSamplesNum_, randomSamplesNum_);
-        nh_.param("positional_random_noise", positionalRandomNoise_, positionalRandomNoise_);
-        nh_.param("angular_random_noise", angularRandomNoise_, angularRandomNoise_);
-        nh_.param("matching_rate_th", matchingRateTH_, matchingRateTH_);
+        RCLCPP_INFO(this->get_logger(), "GLPoseSampler is initializing...");
+
+        this->declare_parameter("map_name", mapName_);
+        this->get_parameter("map_name", mapName_);
+
+        this->declare_parameter("scan_name", scanName_);
+        this->get_parameter("scan_name", scanName_);
+
+        this->declare_parameter("odom_name", odomName_);
+        this->get_parameter("odom_name", odomName_);
+
+        this->declare_parameter("poses_name", posesName_);
+        this->get_parameter("poses_name", posesName_);
+
+        this->declare_parameter("local_map_name", localMapName_);
+        this->get_parameter("local_map_name", localMapName_);
+
+        this->declare_parameter("sdf_keypoints_name", sdfKeypointsName_);
+        this->get_parameter("sdf_keypoints_name", sdfKeypointsName_);
+
+        this->declare_parameter("local_sdf_keypoints_name", localSDFKeypointsName_);
+        this->get_parameter("local_sdf_keypoints_name", localSDFKeypointsName_);
+
+        this->declare_parameter("map_frame", mapFrame_);
+        this->get_parameter("map_frame", mapFrame_);
+
+        this->declare_parameter("odom_frame", odomFrame_);
+        this->get_parameter("odom_frame", odomFrame_);
+
+        this->declare_parameter("base_link_frame", baseLinkFrame_);
+        this->get_parameter("base_link_frame", baseLinkFrame_);
+
+        this->declare_parameter("laser_frame", laserFrame_);
+        this->get_parameter("laser_frame", laserFrame_);
+
+        this->declare_parameter("key_scans_num", keyScansNum_);
+        this->get_parameter("key_scans_num", keyScansNum_);
+
+        this->declare_parameter("key_scan_interval_dist", keyScanIntervalDist_);
+        this->get_parameter("key_scan_interval_dist", keyScanIntervalDist_);
+
+        this->declare_parameter("key_scan_interval_yaw", keyScanIntervalYaw_);
+        this->get_parameter("key_scan_interval_yaw", keyScanIntervalYaw_);
+
+        this->declare_parameter("gradient_square_th", gradientSquareTH_);
+        this->get_parameter("gradient_square_th", gradientSquareTH_);
+
+        this->declare_parameter("keypoints_min_dist_from_map", keypointsMinDistFromMap_);
+        this->get_parameter("keypoints_min_dist_from_map", keypointsMinDistFromMap_);
+
+        this->declare_parameter("sdf_feature_window_size", sdfFeatureWindowSize_);
+        this->get_parameter("sdf_feature_window_size", sdfFeatureWindowSize_);
+
+        this->declare_parameter("average_sdf_delta_th", averageSDFDeltaTH_);
+        this->get_parameter("average_sdf_delta_th", averageSDFDeltaTH_);
+
+        this->declare_parameter("add_random_samples", addRandomSamples_);
+        this->get_parameter("add_random_samples", addRandomSamples_);
+
+        this->declare_parameter("add_opposite_samples", addOppositeSamples_);
+        this->get_parameter("add_opposite_samples", addOppositeSamples_);
+
+        this->declare_parameter("random_samples_num", randomSamplesNum_);
+        this->get_parameter("random_samples_num", randomSamplesNum_);
+
+        this->declare_parameter("positional_random_noise", positionalRandomNoise_);
+        this->get_parameter("positional_random_noise", positionalRandomNoise_);
+
+        this->declare_parameter("angular_random_noise", angularRandomNoise_);
+        this->get_parameter("angular_random_noise", angularRandomNoise_);
+
+        this->declare_parameter("matching_rate_th", matchingRateTH_);
+        this->get_parameter("matching_rate_th", matchingRateTH_);
+
+        RCLCPP_INFO(this->get_logger(), "  map_name: %s", mapName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  scan_name: %s", scanName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  odom_name: %s", odomName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  poses_name: %s", posesName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  local_map_name: %s", localMapName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  sdf_keypoints_name: %s", sdfKeypointsName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  local_sdf_keypoints_name: %s", localSDFKeypointsName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  map_frame: %s", mapFrame_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  odom_frame: %s", odomFrame_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  base_link_frame: %s", baseLinkFrame_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  laser_frame: %s", laserFrame_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  key_scans_num: %d", keyScansNum_);
+        RCLCPP_INFO(this->get_logger(), "  key_scan_interval_dist: %.3f", keyScanIntervalDist_);
+        RCLCPP_INFO(this->get_logger(), "  key_scan_interval_yaw: %.3f", keyScanIntervalYaw_);
+        RCLCPP_INFO(this->get_logger(), "  gradient_square_th: %.3f", gradientSquareTH_);
+        RCLCPP_INFO(this->get_logger(), "  keypoints_min_dist_from_map: %.3f", keypointsMinDistFromMap_);
+        RCLCPP_INFO(this->get_logger(), "  sdf_feature_window_size: %.3f", sdfFeatureWindowSize_);
+        RCLCPP_INFO(this->get_logger(), "  average_sdf_delta_th: %.3f", averageSDFDeltaTH_);
+        RCLCPP_INFO(this->get_logger(), "  add_random_samples: %s", addRandomSamples_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "  add_opposite_samples: %s", addOppositeSamples_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "  random_samples_num: %d", randomSamplesNum_);
+        RCLCPP_INFO(this->get_logger(), "  positional_random_noise: %.3f", positionalRandomNoise_);
+        RCLCPP_INFO(this->get_logger(), "  angular_random_noise: %.3f", angularRandomNoise_);
+        RCLCPP_INFO(this->get_logger(), "  matching_rate_th: %.3f", matchingRateTH_);
+
+        tfBuffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
+        tfBuffer_->setUsingDedicatedThread(true);
+        tfListener_ = std::make_shared<tf2_ros::TransformListener>(*tfBuffer_);
+        tfBroadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(*this);
 
         keyScanIntervalYaw_ *= M_PI / 180.0;
 
-        mapSub_ = nh_.subscribe(mapName_, 1, &GLPoseSampler::mapCB, this);
-        odomSub_ = nh_.subscribe(odomName_, 1, &GLPoseSampler::odomCB, this);
-        scanSub_ = nh_.subscribe(scanName_, 1, &GLPoseSampler::scanCB, this);
+        mapSub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
+            mapName_, 1, std::bind(&GLPoseSampler::mapCB, this, std::placeholders::_1));
+        odomSub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+            odomName_, 1, std::bind(&GLPoseSampler::odomCB, this, std::placeholders::_1));
+        scanSub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
+            scanName_, 1, std::bind(&GLPoseSampler::scanCB, this, std::placeholders::_1));
 
-        posesPub_ = nh_.advertise<geometry_msgs::PoseArray>(posesName_, 1);
-        localMapPub_ = nh_.advertise<nav_msgs::OccupancyGrid>(localMapName_, 1);
-        sdfKeypointsPub_ = nh_.advertise<visualization_msgs::Marker>(sdfKeypointsName_, 1);
-        localSDFKeypointsPub_ = nh_.advertise<visualization_msgs::Marker>(localSDFKeypointsName_, 1);
+        posesPub_ = this->create_publisher<geometry_msgs::msg::PoseArray>(
+            posesName_, 1);
+        localMapPub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
+            localMapName_, 1);
+        sdfKeypointsPub_ = this->create_publisher<visualization_msgs::msg::Marker>(
+            sdfKeypointsName_, 1);
+        localSDFKeypointsPub_ = this->create_publisher<visualization_msgs::msg::Marker>(
+            localSDFKeypointsName_, 1);
 
         odomPose_.setPose(0.0, 0.0, 0.0);
 
-        ros::Rate loopRate(10.0);
-        int cnt;
-        cnt = 0;
-        while (ros::ok()) {
-            ros::spinOnce();
+        int cnt = 0;
+        rclcpp::Rate rate(10);
+        while (rclcpp::ok()) {
+            rclcpp::spin_some(this->get_node_base_interface());
+            if (gotMap_) break;
             cnt++;
             if (cnt >= 300) {
-                ROS_ERROR("A map message might not be published.");
-                exit(1);
+                RCLCPP_ERROR(this->get_logger(), "A map message might not be published.");
+                rclcpp::shutdown();
+                return;
             }
-            if (gotMap_)
-                break;
-            loopRate.sleep();
+            rate.sleep();
         }
 
         cnt = 0;
-        while (ros::ok()) {
-            ros::spinOnce();
+        while (rclcpp::ok()) {
+            rclcpp::spin_some(this->get_node_base_interface());
+            if (gotOdom_) break;
             cnt++;
             if (cnt >= 300) {
-                ROS_ERROR("A odom message might not be published.");
-                exit(1);
+                RCLCPP_ERROR(this->get_logger(), "An odom message might not be published.");
+                rclcpp::shutdown();
+                return;
             }
-            if (gotOdom_)
-                break;
-            loopRate.sleep();
+            rate.sleep();
         }
 
-        tf::StampedTransform tfBaseLink2Laser;
         cnt = 0;
-        while (ros::ok()) {
-            ros::spinOnce();
+        while (rclcpp::ok()) {
+            rclcpp::spin_some(this->get_node_base_interface());
             try {
-                ros::Time now = ros::Time::now();
-                tfListener_.waitForTransform(baseLinkFrame_, laserFrame_, now, ros::Duration(2.0));
-                tfListener_.lookupTransform(baseLinkFrame_, laserFrame_, now, tfBaseLink2Laser);
+                geometry_msgs::msg::TransformStamped tfStamped =
+                    tfBuffer_->lookupTransform(
+                        baseLinkFrame_, laserFrame_, tf2::TimePointZero,
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds(2)));
+                tf2::Quaternion quat;
+                tf2::fromMsg(tfStamped.transform.rotation, quat);
+                double roll, pitch, yaw;
+                tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
+                baseLink2Laser_.setX(tfStamped.transform.translation.x);
+                baseLink2Laser_.setY(tfStamped.transform.translation.y);
+                baseLink2Laser_.setYaw(yaw);
                 break;
-            } catch (tf::TransformException ex) {
+            } catch (tf2::TransformException &ex) {
                 cnt++;
                 if (cnt >= 300) {
-                    ROS_ERROR("Cannot get the relative pose from the base link to the laser from the tf tree."
+                    RCLCPP_ERROR(this->get_logger(), "Cannot get the relative pose from the base link to the laser from the tf tree."
                         " Did you set the static transform publisher between %s to %s?",
                         baseLinkFrame_.c_str(), laserFrame_.c_str());
-                    exit(1);
+                    rclcpp::shutdown();
+                    return;
                 }
-                loopRate.sleep();
             }
+            rate.sleep();
         }
-        tf::Quaternion quatBaseLink2Laser(tfBaseLink2Laser.getRotation().x(),
-            tfBaseLink2Laser.getRotation().y(),
-            tfBaseLink2Laser.getRotation().z(),
-            tfBaseLink2Laser.getRotation().w());
-        double baseLink2LaserRoll, baseLink2LaserPitch, baseLink2LaserYaw;
-        tf::Matrix3x3 rotMatBaseLink2Laser(quatBaseLink2Laser);
-        rotMatBaseLink2Laser.getRPY(baseLink2LaserRoll, baseLink2LaserPitch, baseLink2LaserYaw);
-        baseLink2Laser_.setX(tfBaseLink2Laser.getOrigin().x());
-        baseLink2Laser_.setY(tfBaseLink2Laser.getOrigin().y());
-        baseLink2Laser_.setYaw(baseLink2LaserYaw);
 
-        ROS_INFO("GL pose sampler ready to perform.");
-    }
-
-    void spin(void) {
-        ros::spin();
+        RCLCPP_INFO(this->get_logger(), "GL pose sampler ready to perform.");
     }
 
 private:
@@ -295,24 +397,23 @@ private:
         *y = dy + mapOrigin_.getY();
     }
 
-    void setMapInfo(nav_msgs::OccupancyGrid map) {
+    void setMapInfo(const nav_msgs::msg::OccupancyGrid &map) {
         mapWidth_ = map.info.width;
         mapHeight_ = map.info.height;
         mapResolution_ = map.info.resolution;
         mapOrigin_.setX(map.info.origin.position.x);
         mapOrigin_.setY(map.info.origin.position.y);
-        tf::Quaternion q(map.info.origin.orientation.x, 
-            map.info.origin.orientation.y, 
+        tf2::Quaternion q(map.info.origin.orientation.x,
+            map.info.origin.orientation.y,
             map.info.origin.orientation.z,
             map.info.origin.orientation.w);
         double roll, pitch, yaw;
-        tf::Matrix3x3 m(q);
-        m.getRPY(roll, pitch, yaw);
+        tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
         mapOrigin_.setYaw(yaw);
         mapData_ = map.data;
     }
 
-    cv::Mat buildDistanceFieldMap(nav_msgs::OccupancyGrid map) {
+    cv::Mat buildDistanceFieldMap(const nav_msgs::msg::OccupancyGrid &map) {
         cv::Mat binMap(map.info.height, map.info.width, CV_8UC1);
         for (int v = 0; v < map.info.height; v++) {
             for (int u = 0; u < map.info.width; u++) {
@@ -336,15 +437,14 @@ private:
         return distMap;
     }
 
-    std::vector<Keypoint> detectKeypoints(nav_msgs::OccupancyGrid map, cv::Mat distMap) {
+    std::vector<Keypoint> detectKeypoints(const nav_msgs::msg::OccupancyGrid &map, const cv::Mat &distMap) {
         std::vector<Keypoint> keypoints;
-        tf::Quaternion q(map.info.origin.orientation.x, 
+        tf2::Quaternion q(map.info.origin.orientation.x, 
             map.info.origin.orientation.y, 
             map.info.origin.orientation.z,
             map.info.origin.orientation.w);
         double roll, pitch, yaw;
-        tf::Matrix3x3 m(q);
-        m.getRPY(roll, pitch, yaw);
+        tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
         mapOrigin_.setYaw(yaw);
         for (int u = 1; u < map.info.width - 1; ++u) {
             for (int v = 1; v < map.info.height - 1; ++v) {
@@ -446,22 +546,23 @@ private:
         return features;
     }
 
-    visualization_msgs::Marker makeSDFKeypointsMarker(std::vector<Keypoint> keypoints, std::string frame) {
-        visualization_msgs::Marker marker;
+    visualization_msgs::msg::Marker makeSDFKeypointsMarker(const std::vector<Keypoint> &keypoints, const std::string &frame) {
+        visualization_msgs::msg::Marker marker;
         marker.header.frame_id = frame;
+        marker.header.stamp = this->now();
         marker.ns = "gl_marker_namespace";
         marker.id = 0;
-        marker.type = visualization_msgs::Marker::SPHERE_LIST;
-        marker.action = visualization_msgs::Marker::ADD;
+        marker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
+        marker.action = visualization_msgs::msg::Marker::ADD;
         marker.scale.x = 0.2;
         marker.scale.y = 0.2;
         marker.scale.z = 0.2;
-        std_msgs::ColorRGBA c;
+        std_msgs::msg::ColorRGBA c;
         c.a = 1.0;
         marker.points.resize((int)keypoints.size());
         marker.colors.resize((int)keypoints.size());
         for (int i = 0; i < (int)keypoints.size(); ++i) {
-            geometry_msgs::Point p;
+            geometry_msgs::msg::Point p;
             p.x = keypoints[i].getX();
             p.y = keypoints[i].getY();
             p.z = 0.0;
@@ -479,7 +580,7 @@ private:
     }
 
     // it does not correspond to rotation of the map
-    void writeMapAndKeypoints(nav_msgs::OccupancyGrid map, std::vector<Keypoint> keypoints) {
+    void writeMapAndKeypoints(const nav_msgs::msg::OccupancyGrid &map, const std::vector<Keypoint> &keypoints) {
         FILE *fp;
         fp = fopen("/tmp/als_ros_map_points.txt", "w");
         for (int u = 0; u < map.info.width; ++u) {
@@ -505,33 +606,33 @@ private:
         fclose(fp);
     }
 
-    void mapCB(const nav_msgs::OccupancyGrid::ConstPtr &msg) {
+    void mapCB(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
         setMapInfo(*msg);
         cv::Mat distMap = buildDistanceFieldMap(*msg);
         cv::GaussianBlur(distMap, distMap, cv::Size(5, 5), 5);
         sdfKeypoints_ = detectKeypoints(*msg, distMap);
         sdfOrientationFeatures_ = calculateFeatures(distMap, sdfKeypoints_);
         sdfKeypointsMarker_ = makeSDFKeypointsMarker(sdfKeypoints_, mapFrame_);
-        sdfKeypointsPub_.publish(sdfKeypointsMarker_);
+        sdfKeypointsPub_->publish(sdfKeypointsMarker_);
 //        writeMapAndKeypoints(*msg, sdfKeypoints_);
         gotMap_ = true;
     }
 
-    void odomCB(const nav_msgs::Odometry::ConstPtr &msg) {
-        tf::Quaternion q(msg->pose.pose.orientation.x, 
+    void odomCB(const nav_msgs::msg::Odometry::SharedPtr msg) {
+        tf2::Quaternion q(msg->pose.pose.orientation.x, 
             msg->pose.pose.orientation.y, 
             msg->pose.pose.orientation.z,
             msg->pose.pose.orientation.w);
         double roll, pitch, yaw;
-        tf::Matrix3x3 m(q);
-        m.getRPY(roll, pitch, yaw);
+        tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
         odomPose_.setPose(msg->pose.pose.position.x, msg->pose.pose.position.y, yaw);
         gotOdom_ = true;
     }
 
-    nav_msgs::OccupancyGrid buildLocalMap(void) {
-        nav_msgs::OccupancyGrid map;
+    nav_msgs::msg::OccupancyGrid buildLocalMap(void) {
+        nav_msgs::msg::OccupancyGrid map;
         map.header.frame_id = odomFrame_;
+        map.header.stamp = this->now();
 
         double rangeMax = keyScans_[0].range_max;
         map.info.width = (int)(rangeMax * 3.0 / mapResolution_);
@@ -549,7 +650,7 @@ private:
             double sensorX = baseLink2Laser_.getX() * c - baseLink2Laser_.getY() * s + keyPoses_[i].getX();
             double sensorY = baseLink2Laser_.getX() * s + baseLink2Laser_.getY() * c + keyPoses_[i].getY();
             double sensorYaw = yaw + keyPoses_[i].getYaw();
-            sensor_msgs::LaserScan scan = keyScans_[i];
+            sensor_msgs::msg::LaserScan scan = keyScans_[i];
             for (int j = 0; j < (int)scan.ranges.size(); ++j) {
                 double range = scan.ranges[j];
                 if (range < scan.range_min || scan.range_max < range)
@@ -585,7 +686,7 @@ private:
         return map;
     }
 
-    std::vector<int> findCorrespondingFeatures(std::vector<Keypoint> localSDFKeypoints, std::vector<SDFOrientationFeature> localFeatures) {
+    std::vector<int> findCorrespondingFeatures(const std::vector<Keypoint> &localSDFKeypoints, const std::vector<SDFOrientationFeature> &localFeatures) {
         std::vector<int> correspondingIndices((int)localSDFKeypoints.size());
         for (int i = 0; i < (int)localSDFKeypoints.size(); ++i) {
             char localKeypointType = localSDFKeypoints[i].getType();
@@ -638,14 +739,14 @@ private:
         return correspondingIndices;
     }
 
-    double computeMatchingRate(Pose pose) {
+    double computeMatchingRate(const Pose &pose) {
         double yaw = baseLink2Laser_.getYaw();
         double c = cos(yaw);
         double s = sin(yaw);
         double sensorX = baseLink2Laser_.getX() * c - baseLink2Laser_.getY() * s + pose.getX();
         double sensorY = baseLink2Laser_.getX() * s + baseLink2Laser_.getY() * c + pose.getY();
         double sensorYaw = yaw + pose.getYaw();
-        sensor_msgs::LaserScan scan = keyScans_[(int)keyScans_.size() - 1];
+        sensor_msgs::msg::LaserScan scan = keyScans_[(int)keyScans_.size() - 1];
 
         int validScanNum = 0, matchingNum = 0;
         for (int i = 0; i < (int)scan.ranges.size(); ++i) {
@@ -674,10 +775,10 @@ private:
         return (double)matchingNum / (double)validScanNum;
     }
 
-    geometry_msgs::PoseArray generatePoses(Pose currentOdomPose, std::vector<Keypoint> localSDFKeypoints,
-        std::vector<SDFOrientationFeature> localSDFOrientationFeatures, std::vector<int> correspondingIndices)
+    geometry_msgs::msg::PoseArray generatePoses(const Pose &currentOdomPose, const std::vector<Keypoint> &localSDFKeypoints,
+        const std::vector<SDFOrientationFeature> &localSDFOrientationFeatures, const std::vector<int> &correspondingIndices)
     {
-        geometry_msgs::PoseArray poses;
+        geometry_msgs::msg::PoseArray poses;
         poses.header.frame_id = mapFrame_;
         for (int i = 0; i < (int)correspondingIndices.size(); ++i) {
             int idx = correspondingIndices[i];
@@ -718,10 +819,12 @@ private:
                     if (computeMatchingRate(Pose(baseX, baseY, baseYaw)) < matchingRateTH_)
                         continue;
                 }
-                geometry_msgs::Pose pose;
+                geometry_msgs::msg::Pose pose;
                 pose.position.x = baseX;
                 pose.position.y = baseY;
-                pose.orientation = tf::createQuaternionMsgFromYaw(baseYaw);
+                tf2::Quaternion q;
+                q.setRPY(0.0, 0.0, baseYaw);
+                pose.orientation = tf2::toMsg(q);
                 poses.poses.push_back(pose);
             } else {
                 for (int j = 0; j < randomSamplesNum_; ++j) {
@@ -736,10 +839,12 @@ private:
                         if (computeMatchingRate(Pose(x, y, yaw)) < matchingRateTH_)
                             continue;
                     }
-                    geometry_msgs::Pose pose;
+                    geometry_msgs::msg::Pose pose;
                     pose.position.x = x;
                     pose.position.y = y;
-                    pose.orientation = tf::createQuaternionMsgFromYaw(yaw);
+                    tf2::Quaternion q;
+                    q.setRPY(0.0, 0.0, yaw);
+                    pose.orientation = tf2::toMsg(q);
                     poses.poses.push_back(pose);
                 }
             }
@@ -747,7 +852,7 @@ private:
         return poses;
     }
 
-    void scanCB(const sensor_msgs::LaserScan::ConstPtr &msg) {
+    void scanCB(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
         static bool isFirst = true;
         static Pose prevOdomPose;
 
@@ -759,7 +864,7 @@ private:
         }
         double validScanRate = (double)validScanNum / (double)msg->ranges.size();
         if (validScanRate < 0.1) {
-            ROS_WARN("gl pose sampler might subscribe invalid scan.");
+            RCLCPP_ERROR(this->get_logger(), "gl pose sampler might subscribe invalid scan.");
             return;
         }
 
@@ -792,21 +897,21 @@ private:
         }
 
         if (isKeyScanUpdated && (int)keyScans_.size() == keyScansNum_) {
-            nav_msgs::OccupancyGrid localMap = buildLocalMap();
+            nav_msgs::msg::OccupancyGrid localMap = buildLocalMap();
             cv::Mat localDistMap = buildDistanceFieldMap(localMap);
             cv::GaussianBlur(localDistMap, localDistMap, cv::Size(5, 5), 5);
             std::vector<Keypoint> localSDFKeypoints = detectKeypoints(localMap, localDistMap);
             std::vector<SDFOrientationFeature> localSDFOrientationFeatures = calculateFeatures(localDistMap, localSDFKeypoints);
 //            writeMapAndKeypoints(localMap, localSDFKeypoints);
             std::vector<int> correspondingIndices = findCorrespondingFeatures(localSDFKeypoints, localSDFOrientationFeatures);
-            geometry_msgs::PoseArray poses = generatePoses(prevOdomPose, localSDFKeypoints, localSDFOrientationFeatures, correspondingIndices);
-            visualization_msgs::Marker localSDFKeypointsMarker = makeSDFKeypointsMarker(localSDFKeypoints, odomFrame_);
+            geometry_msgs::msg::PoseArray poses = generatePoses(prevOdomPose, localSDFKeypoints, localSDFOrientationFeatures, correspondingIndices);
+            visualization_msgs::msg::Marker localSDFKeypointsMarker = makeSDFKeypointsMarker(localSDFKeypoints, odomFrame_);
 
             poses.header.stamp = localMap.header.stamp = sdfKeypointsMarker_.header.stamp = localSDFKeypointsMarker.header.stamp = msg->header.stamp;
-            posesPub_.publish(poses);
-            localMapPub_.publish(localMap);
-            sdfKeypointsPub_.publish(sdfKeypointsMarker_);
-            localSDFKeypointsPub_.publish(localSDFKeypointsMarker);
+            posesPub_->publish(poses);
+            localMapPub_->publish(localMap);
+            sdfKeypointsPub_->publish(sdfKeypointsMarker_);
+            localSDFKeypointsPub_->publish(localSDFKeypointsMarker);
         }
     }
 }; // class GLPoseSampler

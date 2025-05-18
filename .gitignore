@@ -1,10 +1,10 @@
 # Build space
 build
-build/*
-devel
-devel/*
-make.sh
-clean.sh
+install
+log
+
+# Dataset
+dataset/
 
 # Prerequisites
 *.d

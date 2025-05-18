@@ -1,0 +1,10 @@
+<!-- gl_pose_sampler.launch -->
+<launch >
+      <arg name="yaml_file" default="$(find-pkg-share als_ros2)/config/gl_pose_sampler.yaml" />
+
+      <!-- gl pose sampler node -->
+      <!-- 自己位置推定の候補となるPoseを生成・評価する -->
+      <node pkg="als_ros2" name="gl_pose_sampler" exec="gl_pose_sampler" output="screen">
+            <param from="$(var yaml_file)" />
+      </node>
+</launch >

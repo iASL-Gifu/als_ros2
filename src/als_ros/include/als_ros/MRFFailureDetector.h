@@ -23,10 +23,10 @@
 #include <iostream>
 #include <cmath>
 #include <vector>
-#include <ros/ros.h>
-#include <sensor_msgs/LaserScan.h>
-#include <geometry_msgs/Vector3Stamped.h>
-#include <visualization_msgs/Marker.h>
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
+#include <geometry_msgs/msg/vector3_stamped.hpp>
+#include <visualization_msgs/msg/marker.hpp>
 
 namespace als_ros {
 
@@ -36,18 +36,21 @@ enum MeasurementClass {
     UNKNOWN = 2
 };
 
-class MRFFD {
+class MRFFD : public rclcpp::Node{
 private:
     // ros subscribers and publishers
-    ros::NodeHandle nh_;
     std::string residualErrorsName_;
-    ros::Subscriber residualErrorsSub_;
+    rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr residualErrorsSub_;
+
     std::string failureProbName_, alignedScanName_, misalignedScanName_, unknownScanName_;
-    ros::Publisher failureProbPub_, alignedScanPub_, misalignedScanPub_, unknownScanPub_;
+    rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr failureProbPub_;
+    rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr alignedScanPub_;
+    rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr misalignedScanPub_;
+    rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr unknownScanPub_;
     bool publishClassifiedScans_;
 
     std::string failureProbabilityMarkerName_, markerFrame_;
-    ros::Publisher failureProbabilityMarkerPub_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr failureProbabilityMarkerPub_;
     bool publishFailureProbabilityMarker_;
 
     // parametsrs
@@ -60,7 +63,7 @@ private:
     double misalignmentRatioThreshold_, unknownRatioThreshold_;
     std::vector<double> transitionProbMat_;
 
-    sensor_msgs::LaserScan residualErrors_;
+    sensor_msgs::msg::LaserScan residualErrors_;
     std::vector<double> usedResidualErrors_;
     std::vector<int> usedScanIndices_;
     bool canUpdateResidualErrors_, gotResidualErrors_;
@@ -69,11 +72,13 @@ private:
     // results
     std::vector<std::vector<double>> measurementClassProbabilities_;
     double failureProbability_;
-    ros::Time failureProbabilityStamp_;
+    rclcpp::Time failureProbabilityStamp_;
+
+    // timer
+    rclcpp::TimerBase::SharedPtr timer_;
 
 public:
-    MRFFD():
-        nh_("~"),
+    MRFFD(): Node("mrf_failure_detector"),
         residualErrorsName_("/residual_errors"),
         failureProbName_("/failure_probability"),
         alignedScanName_("/aligned_scan_mrf"),
@@ -99,63 +104,156 @@ public:
         gotResidualErrors_(false),
         failureDetectionHz_(10.0)
     {
+        RCLCPP_INFO(this->get_logger(), "MRFFailureDetector is initializing...");
+
         // input and output message names
-        nh_.param("residual_errors_name", residualErrorsName_, residualErrorsName_);
-        nh_.param("failure_probability_name", failureProbName_, failureProbName_);
-        nh_.param("publish_classified_scans", publishClassifiedScans_, publishClassifiedScans_);
-        nh_.param("aligned_scan_mrf", alignedScanName_, alignedScanName_);
-        nh_.param("misaligned_scan_mrf", misalignedScanName_, misalignedScanName_);
-        nh_.param("unknown_scan_mrf", unknownScanName_, unknownScanName_);
-        nh_.param("failure_probability_marker_name", failureProbabilityMarkerName_, failureProbabilityMarkerName_);
-        nh_.param("publish_failure_probability_marker", publishFailureProbabilityMarker_, publishFailureProbabilityMarker_);
-        nh_.param("marker_frame", markerFrame_, markerFrame_);
+        this->declare_parameter<std::string>("residual_errors_name", residualErrorsName_);
+        this->get_parameter("residual_errors_name", residualErrorsName_);
+
+        this->declare_parameter<std::string>("failure_probability_name", failureProbName_);
+        this->get_parameter("failure_probability_name", failureProbName_);
+
+        this->declare_parameter<bool>("publish_classified_scans", publishClassifiedScans_);
+        this->get_parameter("publish_classified_scans", publishClassifiedScans_);
+
+        this->declare_parameter<std::string>("aligned_scan_mrf", alignedScanName_);
+        this->get_parameter("aligned_scan_mrf", alignedScanName_);
+
+        this->declare_parameter<std::string>("misaligned_scan_mrf", misalignedScanName_);
+        this->get_parameter("misaligned_scan_mrf", misalignedScanName_);
+
+        this->declare_parameter<std::string>("unknown_scan_mrf", unknownScanName_);
+        this->get_parameter("unknown_scan_mrf", unknownScanName_);
+
+        this->declare_parameter<std::string>("failure_probability_marker_name", failureProbabilityMarkerName_);
+        this->get_parameter("failure_probability_marker_name", failureProbabilityMarkerName_);
+
+        this->declare_parameter<bool>("publish_failure_probability_marker", publishFailureProbabilityMarker_);
+        this->get_parameter("publish_failure_probability_marker", publishFailureProbabilityMarker_);
+
+        this->declare_parameter<std::string>("marker_frame", markerFrame_);
+        this->get_parameter("marker_frame", markerFrame_);
 
         // parameters
-        nh_.param("normal_distribution_mean", NDMean_, NDMean_);
-        nh_.param("normal_distribution_var", NDVar_, NDVar_);
-        nh_.param("exponential_distribution_lambda", EDLambda_, EDLambda_);
-        nh_.param("max_residual_error", maxResidualError_, maxResidualError_);
-        nh_.param("residual_error_resolution", residualErrorReso_, residualErrorReso_);
-        nh_.param("min_valid_residual_errors_num", minValidResidualErrorsNum_, minValidResidualErrorsNum_);
-        nh_.param("max_residual_errors_num", maxResidualErrorsNum_, maxResidualErrorsNum_);
-        nh_.param("max_lpb_computation_num", maxLPBComputationNum_, maxLPBComputationNum_);
-        nh_.param("sampling_num", samplingNum_, samplingNum_);
-        nh_.param("misalignment_ratio_threshold", misalignmentRatioThreshold_, misalignmentRatioThreshold_);
-        nh_.param("unknown_ratio_threshold", unknownRatioThreshold_, unknownRatioThreshold_);
-        nh_.param("transition_probability_matrix", transitionProbMat_, transitionProbMat_);
+        this->declare_parameter<double>("normal_distribution_mean", NDMean_);
+        this->get_parameter("normal_distribution_mean", NDMean_);
+
+        this->declare_parameter<double>("normal_distribution_var", NDVar_);
+        this->get_parameter("normal_distribution_var", NDVar_);
+
+        this->declare_parameter<double>("exponential_distribution_lambda", EDLambda_);
+        this->get_parameter("exponential_distribution_lambda", EDLambda_);
+
+        this->declare_parameter<double>("max_residual_error", maxResidualError_);
+        this->get_parameter("max_residual_error", maxResidualError_);
+
+        this->declare_parameter<double>("residual_error_resolution", residualErrorReso_);
+        this->get_parameter("residual_error_resolution", residualErrorReso_);
+
+        this->declare_parameter<int>("min_valid_residual_errors_num", minValidResidualErrorsNum_);
+        this->get_parameter("min_valid_residual_errors_num", minValidResidualErrorsNum_);
+
+        this->declare_parameter<int>("max_residual_errors_num", maxResidualErrorsNum_);
+        this->get_parameter("max_residual_errors_num", maxResidualErrorsNum_);
+
+        this->declare_parameter<int>("max_lpb_computation_num", maxLPBComputationNum_);
+        this->get_parameter("max_lpb_computation_num", maxLPBComputationNum_);
+
+        this->declare_parameter<int>("sampling_num", samplingNum_);
+        this->get_parameter("sampling_num", samplingNum_);
+
+        this->declare_parameter<double>("misalignment_ratio_threshold", misalignmentRatioThreshold_);
+        this->get_parameter("misalignment_ratio_threshold", misalignmentRatioThreshold_);
+
+        this->declare_parameter<double>("unknown_ratio_threshold", unknownRatioThreshold_);
+        this->get_parameter("unknown_ratio_threshold", unknownRatioThreshold_);
+
+        this->declare_parameter<std::vector<double>>("transition_probability_matrix", transitionProbMat_);
+        this->get_parameter("transition_probability_matrix", transitionProbMat_);
 
         // other parameters
-        nh_.param("failure_detection_hz", failureDetectionHz_, failureDetectionHz_);
+        this->declare_parameter<double>("failure_detection_hz", failureDetectionHz_);
+        this->get_parameter("failure_detection_hz", failureDetectionHz_);
+
+        RCLCPP_INFO(this->get_logger(), "  residual_errors_name: %s", residualErrorsName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  failure_probability_name: %s", failureProbName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  publish_classified_scans: %s", publishClassifiedScans_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "  aligned_scan_mrf: %s", alignedScanName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  misaligned_scan_mrf: %s", misalignedScanName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  unknown_scan_mrf: %s", unknownScanName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  failure_probability_marker_name: %s", failureProbabilityMarkerName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  publish_failure_probability_marker: %s", publishFailureProbabilityMarker_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "  marker_frame: %s", markerFrame_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  normal_distribution_mean: %.3f", NDMean_);
+        RCLCPP_INFO(this->get_logger(), "  normal_distribution_var: %.3f", NDVar_);
+        RCLCPP_INFO(this->get_logger(), "  exponential_distribution_lambda: %.3f", EDLambda_);
+        RCLCPP_INFO(this->get_logger(), "  max_residual_error: %.3f", maxResidualError_);
+        RCLCPP_INFO(this->get_logger(), "  residual_error_resolution: %.3f", residualErrorReso_);
+        RCLCPP_INFO(this->get_logger(), "  min_valid_residual_errors_num: %d", minValidResidualErrorsNum_);
+        RCLCPP_INFO(this->get_logger(), "  max_residual_errors_num: %d", maxResidualErrorsNum_);
+        RCLCPP_INFO(this->get_logger(), "  max_lpb_computation_num: %d", maxLPBComputationNum_);
+        RCLCPP_INFO(this->get_logger(), "  sampling_num: %d", samplingNum_);
+        RCLCPP_INFO(this->get_logger(), "  misalignment_ratio_threshold: %.3f", misalignmentRatioThreshold_);
+        RCLCPP_INFO(this->get_logger(), "  unknown_ratio_threshold: %.3f", unknownRatioThreshold_);
+        std::ostringstream oss;
+        oss << "  transition_probability_matrix: [";
+        for (size_t i = 0; i < transitionProbMat_.size(); ++i) {
+        oss << transitionProbMat_[i];
+        if (i != transitionProbMat_.size() - 1) oss << ", ";
+        }
+        oss << "]";
+        RCLCPP_INFO(this->get_logger(), "%s", oss.str().c_str());
+        RCLCPP_INFO(this->get_logger(), "  failure_detection_hz: %.3f", failureDetectionHz_);
 
         // ros subscriber and publisher
-        residualErrorsSub_ = nh_.subscribe(residualErrorsName_, 1, &MRFFD::residualErrorsCB, this);
-        failureProbPub_ = nh_.advertise<geometry_msgs::Vector3Stamped>(failureProbName_, 1);
+        residualErrorsSub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
+            residualErrorsName_, 1, std::bind(&MRFFD::residualErrorsCB, this, std::placeholders::_1));
+        failureProbPub_ = this->create_publisher<geometry_msgs::msg::Vector3Stamped>(
+            failureProbName_, 1);
         if (publishClassifiedScans_) {
-            alignedScanPub_ = nh_.advertise<sensor_msgs::LaserScan>(alignedScanName_, 1);
-            misalignedScanPub_ = nh_.advertise<sensor_msgs::LaserScan>(misalignedScanName_, 1);
-            unknownScanPub_ = nh_.advertise<sensor_msgs::LaserScan>(unknownScanName_, 1);
+            alignedScanPub_ = this->create_publisher<sensor_msgs::msg::LaserScan>(
+                alignedScanName_, 1);
+            misalignedScanPub_ = this->create_publisher<sensor_msgs::msg::LaserScan>(
+                misalignedScanName_, 1);
+            unknownScanPub_ = this->create_publisher<sensor_msgs::msg::LaserScan>(
+                unknownScanName_, 1);
         }
-        if (publishFailureProbabilityMarker_)
-            failureProbabilityMarkerPub_ = nh_.advertise<visualization_msgs::Marker>(failureProbabilityMarkerName_, 1);
+        if (publishFailureProbabilityMarker_) {
+            failureProbabilityMarkerPub_ = this->create_publisher<visualization_msgs::msg::Marker>(
+                failureProbabilityMarkerName_, 1);
+        }
 
         // fixed parameters
         NDNormConst_ = 1.0 / sqrt(2.0 * M_PI * NDVar_);
 
         // wait for getting the residual errors
-        ros::Rate loopRate(failureDetectionHz_);
-        int residualErrorsFailedCnt = 0;
-        while (!gotResidualErrors_) {
-            ros::spinOnce();
-            residualErrorsFailedCnt++;
-            if (residualErrorsFailedCnt >= 30) {
-                ROS_ERROR("Cannot get residual errors."
+        int cnt = 0;
+        rclcpp::Rate loopRate(failureDetectionHz_);
+        while (rclcpp::ok() && !gotResidualErrors_) {
+            rclcpp::spin_some(this->get_node_base_interface());
+            cnt++;
+            if (cnt >= 30) {
+                RCLCPP_ERROR(this->get_logger(), "Cannot get residual errors."
                     " Did you publish the residual errors?"
                     " The expected topic name is %s", residualErrorsName_.c_str());
             }
             loopRate.sleep();
         }
 
-        ROS_INFO("MRF failure detector is ready to perform.");
+        RCLCPP_INFO(this->get_logger(), "MRF failure detector is ready to perform.");
+
+        // set timer
+        timer_ = this->create_wall_timer(
+            std::chrono::milliseconds((int)(1000.0 / failureDetectionHz_)),
+            std::bind(&MRFFD::timerCB, this));
+    }
+
+    void timerCB() {
+        setCanUpdateResidualErrors(false);
+        predictFailureProbability();
+        publishROSMessages();
+        setCanUpdateResidualErrors(true);
+        printFailureProbability();
     }
 
     ~MRFFD() {};
@@ -217,14 +315,14 @@ public:
     }
 
     void publishROSMessages(void) {
-        geometry_msgs::Vector3Stamped failureProbability;
+        geometry_msgs::msg::Vector3Stamped failureProbability;
         failureProbability.header.stamp = residualErrors_.header.stamp;
         failureProbability.vector.x = failureProbability_;
-        failureProbPub_.publish(failureProbability);
+        failureProbPub_->publish(failureProbability);
 
         if (publishClassifiedScans_) {
             std::vector<int> residualErrorClasses = getResidualErrorClasses();
-            sensor_msgs::LaserScan alignedScan, misalignedScan, unknownScan;
+            sensor_msgs::msg::LaserScan alignedScan, misalignedScan, unknownScan;
             alignedScan.header = misalignedScan.header = unknownScan.header = residualErrors_.header;
             alignedScan.range_min = misalignedScan.range_min = unknownScan.range_min = residualErrors_.range_min;
             alignedScan.range_max = misalignedScan.range_max = unknownScan.range_max = residualErrors_.range_max;
@@ -249,19 +347,19 @@ public:
                 else
                     unknownScan.ranges[idx] = residualErrors_.ranges[idx];
             }
-            alignedScanPub_.publish(alignedScan);
-            misalignedScanPub_.publish(misalignedScan);
-            unknownScanPub_.publish(unknownScan);
+            alignedScanPub_->publish(alignedScan);
+            misalignedScanPub_->publish(misalignedScan);
+            unknownScanPub_->publish(unknownScan);
         }
 
         if (publishFailureProbabilityMarker_) {
-            visualization_msgs::Marker marker;
+            visualization_msgs::msg::Marker marker;
             marker.header.frame_id = markerFrame_;
             marker.header.stamp = residualErrors_.header.stamp;
             marker.ns = "fp_marker_namespace";
             marker.id = 0;
-            marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
-            marker.action = visualization_msgs::Marker::ADD;
+            marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+            marker.action = visualization_msgs::msg::Marker::ADD;
             marker.pose.position.x = 0.0;
             marker.pose.position.y = -3.0;
             marker.pose.position.z = 0.0;
@@ -275,7 +373,7 @@ public:
             marker.color.b = 1.0;
             if (failureProbability_ > 0.1)
                 marker.color.r = marker.color.g = 0.0;
-            failureProbabilityMarkerPub_.publish(marker);
+            failureProbabilityMarkerPub_->publish(marker);
         }
     }
 
@@ -284,7 +382,7 @@ public:
     }
 
 private:
-    void residualErrorsCB(const sensor_msgs::LaserScan::ConstPtr &msg) {
+    void residualErrorsCB(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
         if (canUpdateResidualErrors_)
             residualErrors_ = *msg;
         if (!gotResidualErrors_)

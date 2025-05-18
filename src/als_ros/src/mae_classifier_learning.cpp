@@ -17,35 +17,53 @@
  * @author Naoki Akai
  ****************************************************************************/
 
-#include <ros/ros.h>
-#include <sensor_msgs/LaserScan.h>
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
 #include <als_ros/Pose.h>
 #include <als_ros/ClassifierDatasetGenerator.h>
 #include <als_ros/MAEClassifier.h>
 
 int main(int argc, char **argv) {
-    ros::init(argc, argv, "mae_classifier_learning");
-    ros::NodeHandle nh("~");
+    rclcpp::init(argc, argv);
+    auto node = std::make_shared<rclcpp::Node>("mae_classifier_learning");
 
     std::vector<std::string> trainDirs, testDirs;
     std::string classifierDir;
     double maxResidualError, maeHistogramBinWidth;
 
-    nh.param("train_dirs", trainDirs, trainDirs);
-    nh.param("test_dirs", testDirs, testDirs);
-    nh.param("classifier_dir", classifierDir, classifierDir);
-    nh.param("max_residual_error", maxResidualError, maxResidualError);
-    nh.param("histogram_bin_width", maeHistogramBinWidth, maeHistogramBinWidth);
+    node->declare_parameter("train_dirs", std::vector<std::string>());
+    node->declare_parameter("test_dirs", std::vector<std::string>());
+    node->declare_parameter("classifier_dir", std::string(""));
+    node->declare_parameter("max_residual_error", 1.0);
+    node->declare_parameter("histogram_bin_width", 0.01);
+
+    node->get_parameter("train_dirs", trainDirs);
+    node->get_parameter("test_dirs", testDirs);
+    node->get_parameter("classifier_dir", classifierDir);
+    node->get_parameter("max_residual_error", maxResidualError);
+    node->get_parameter("histogram_bin_width", maeHistogramBinWidth);
+
+    RCLCPP_INFO(node->get_logger(), "train_dirs:");
+    for (const auto &dir : trainDirs){
+        RCLCPP_INFO(node->get_logger(), "  %s", dir.c_str());
+    }
+    RCLCPP_INFO(node->get_logger(), "test_dirs:");
+    for (const auto &dir : testDirs) {
+        RCLCPP_INFO(node->get_logger(), "  %s", dir.c_str());
+    }
+    RCLCPP_INFO(node->get_logger(), "classifier_dir: %s", classifierDir.c_str());
+    RCLCPP_INFO(node->get_logger(), "max_residual_error: %.6f", maxResidualError);
+    RCLCPP_INFO(node->get_logger(), "histogram_bin_width: %.6f", maeHistogramBinWidth);
 
     std::vector<als_ros::Pose> gtPosesTrain, successPosesTrain, failurePosesTrain;
-    std::vector<sensor_msgs::LaserScan> scansTrain;
+    std::vector<sensor_msgs::msg::LaserScan> scansTrain;
     std::vector<std::vector<double>> successResidualErrorsTrain, failureResidualErrorsTrain;
 
     std::vector<als_ros::Pose> gtPosesTest, successPosesTest, failurePosesTest;
-    std::vector<sensor_msgs::LaserScan> scansTest;
+    std::vector<sensor_msgs::msg::LaserScan> scansTest;
     std::vector<std::vector<double>> successResidualErrorsTest, failureResidualErrorsTest;
 
-    als_ros::ClassifierDatasetGenerator generator;
+    als_ros::ClassifierDatasetGenerator generator(false);
     generator.setTrainDirs(trainDirs);
     generator.setTestDirs(testDirs);
     generator.readTrainDataset(gtPosesTrain, successPosesTrain, failurePosesTrain, scansTrain, successResidualErrorsTrain, failureResidualErrorsTrain);

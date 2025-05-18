@@ -50,10 +50,10 @@ public:
     inline void setPose(double x, double y, double yaw) { x_ = x, y_ = y, yaw_ = yaw, modifyYaw(); }
     inline void setPose(Pose p) { x_ = p.x_, y_ = p.y_, yaw_ = p.yaw_, modifyYaw(); }
 
-    inline double getX(void) { return x_; }
-    inline double getY(void) { return y_; }
-    inline double getYaw(void) { return yaw_; }
-    inline Pose getPose(void) { return Pose(x_, y_, yaw_); }
+    inline double getX(void) const { return x_; }
+    inline double getY(void) const { return y_; }
+    inline double getYaw(void) const { return yaw_; }
+    inline Pose getPose(void) const { return Pose(x_, y_, yaw_); }
 
 }; // class Pose
 

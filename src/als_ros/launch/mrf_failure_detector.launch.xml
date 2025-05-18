@@ -1,0 +1,14 @@
+<!-- mrf_failure_detector.launch -->
+<launch >
+      <arg name="yaml_file" default="$(find-pkg-share als_ros2)/config/mrf_failure_detector.yaml" />
+
+      <!-- Failure detector node -->
+      <!--
+            数式ベースで自己位置推定の信頼度を計算
+            信頼度が低いときに再初期化を検討するトリガーとして使える
+            スタック回避、壁衝突防止、安全停止などに活用できる
+      -->
+      <node pkg="als_ros2" name="mrf_failure_detector" exec="mrf_failure_detector" output="screen">
+            <param from="$(var yaml_file)" />
+      </node>
+</launch >

@@ -20,9 +20,10 @@
 #ifndef __CLASSIFIER_DATASET_GENERATOR_H__
 #define __CLASSIFIER_DATASET_GENERATOR_H__
 
-#include <tf/tf.h>
-#include <sensor_msgs/LaserScan.h>
-#include <nav_msgs/OccupancyGrid.h>
+#include <rclcpp/rclcpp.hpp>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
+#include <nav_msgs/msg/occupancy_grid.hpp>
 #include <opencv2/opencv.hpp>
 #include <als_ros/Pose.h>
 
@@ -42,18 +43,16 @@ public:
         x_(x), y_(y), s_(s) {}
 }; // class Obstacle
 
-class ClassifierDatasetGenerator {
+class ClassifierDatasetGenerator : public rclcpp::Node {
 private:
-    ros::NodeHandle nh_;
-
     std::string mapName_;
-    ros::Subscriber mapSub_;
+    rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr mapSub_;
 
     int generateSampleNum_;
     std::string saveDir_;
     std::vector<std::string> trainDirs_, testDirs_;
 
-    nav_msgs::OccupancyGrid map_;
+    nav_msgs::msg::OccupancyGrid map_;
     cv::Mat distMap_;
     double mapResolution_;
     Pose mapOrigin_;
@@ -70,8 +69,30 @@ private:
     double positionalErrorMax_, angularErrorMax_;
 
 public:
-    ClassifierDatasetGenerator(void):
-        nh_("~"),
+    void generateDataset(void) {
+        for (int i = 0; i < generateSampleNum_; ++i) {
+            std::vector<Obstacle> obstacles = generateObstacles();
+            nav_msgs::msg::OccupancyGrid simMap = buildSimulationMap(obstacles);
+            Pose gtPose, successPose, failurePose;
+            generatePoses(gtPose, successPose, failurePose);
+            sensor_msgs::msg::LaserScan scan = simulateScan(gtPose, simMap);
+            if (!isValidScan(scan)) {
+                RCLCPP_INFO(this->get_logger(), "Simulated scan is invalid.");
+                i--;
+                continue;
+            }
+            std::vector<double> successResidualErrors = getResidualErrors(successPose, scan);
+            std::vector<double> failureResidualErrors = getResidualErrors(failurePose, scan);
+            saveData(gtPose, successPose, failurePose, scan, successResidualErrors, failureResidualErrors);
+            if ((i + 1) % 10 == 0)
+                RCLCPP_INFO(this->get_logger(), "%.2lf [%%] process done.", (double)(i + 1) / (double)generateSampleNum_ * 100.0);
+            if (!rclcpp::ok()) {
+                break;
+            }
+        }
+    }
+
+    ClassifierDatasetGenerator(bool auto_start_generation = true) : Node("classifier_dataset_generator"),
         mapName_("/map"),
         generateSampleNum_(1000),
         saveDir_("/tmp/classifier_dataset/"),
@@ -88,27 +109,78 @@ public:
         failureAngularErrorTH_(2.0),
         positionalErrorMax_(0.5),
         angularErrorMax_(5.0),
-        gotMap_(false) {}
+        gotMap_(false)
+    {
+        if (!auto_start_generation) return;
 
-    void datasetGenerationInit(void) {
+        RCLCPP_INFO(this->get_logger(), "ClassifierDatasetGenerator is initializing...");
+
         srand((unsigned int)time(NULL));
 
-        nh_.param("map_name", mapName_, mapName_);
-        nh_.param("generate_sample_num", generateSampleNum_, generateSampleNum_);
-        nh_.param("save_dir", saveDir_, saveDir_);
-        nh_.param("obstacles_num", obstaclesNum_, obstaclesNum_);
-        nh_.param("angle_min", angleMin_, angleMin_);
-        nh_.param("angle_max", angleMax_, angleMax_);
-        nh_.param("angle_increment", angleIncrement_, angleIncrement_);
-        nh_.param("range_min", rangeMin_, rangeMin_);
-        nh_.param("range_max", rangeMax_, rangeMax_);
-        nh_.param("scan_angle_noise", scanAngleNoise_, scanAngleNoise_);
-        nh_.param("scan_range_noise", scanRangeNoise_, scanRangeNoise_);
-        nh_.param("valid_scan_rate_th", validScanRateTH_, validScanRateTH_);
-        nh_.param("failure_positional_error_th", failurePositionalErrorTH_, failurePositionalErrorTH_);
-        nh_.param("failure_angular_error_th", failureAngularErrorTH_, failureAngularErrorTH_);
-        nh_.param("positional_error_max", positionalErrorMax_, positionalErrorMax_);
-        nh_.param("angular_error_max", angularErrorMax_, angularErrorMax_);
+        this->declare_parameter("map_name", mapName_);
+        this->get_parameter("map_name", mapName_);
+
+        this->declare_parameter("generate_sample_num", generateSampleNum_);
+        this->get_parameter("generate_sample_num", generateSampleNum_);
+
+        this->declare_parameter("save_dir", saveDir_);
+        this->get_parameter("save_dir", saveDir_);
+
+        this->declare_parameter("obstacles_num", obstaclesNum_);
+        this->get_parameter("obstacles_num", obstaclesNum_);
+
+        this->declare_parameter("angle_min", angleMin_);
+        this->get_parameter("angle_min", angleMin_);
+
+        this->declare_parameter("angle_max", angleMax_);
+        this->get_parameter("angle_max", angleMax_);
+
+        this->declare_parameter("angle_increment", angleIncrement_);
+        this->get_parameter("angle_increment", angleIncrement_);
+
+        this->declare_parameter("range_min", rangeMin_);
+        this->get_parameter("range_min", rangeMin_);
+
+        this->declare_parameter("range_max", rangeMax_);
+        this->get_parameter("range_max", rangeMax_);
+
+        this->declare_parameter("scan_angle_noise", scanAngleNoise_);
+        this->get_parameter("scan_angle_noise", scanAngleNoise_);
+
+        this->declare_parameter("scan_range_noise", scanRangeNoise_);
+        this->get_parameter("scan_range_noise", scanRangeNoise_);
+
+        this->declare_parameter("valid_scan_rate_th", validScanRateTH_);
+        this->get_parameter("valid_scan_rate_th", validScanRateTH_);
+
+        this->declare_parameter("failure_positional_error_th", failurePositionalErrorTH_);
+        this->get_parameter("failure_positional_error_th", failurePositionalErrorTH_);
+
+        this->declare_parameter("failure_angular_error_th", failureAngularErrorTH_);
+        this->get_parameter("failure_angular_error_th", failureAngularErrorTH_);
+
+        this->declare_parameter("positional_error_max", positionalErrorMax_);
+        this->get_parameter("positional_error_max", positionalErrorMax_);
+
+        this->declare_parameter("angular_error_max", angularErrorMax_);
+        this->get_parameter("angular_error_max", angularErrorMax_);
+
+        RCLCPP_INFO(this->get_logger(), "  map_name: %s", mapName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  generate_sample_num: %d", generateSampleNum_);
+        RCLCPP_INFO(this->get_logger(), "  save_dir: %s", saveDir_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  obstacles_num: %d", obstaclesNum_);
+        RCLCPP_INFO(this->get_logger(), "  angle_min: %.3f", angleMin_);
+        RCLCPP_INFO(this->get_logger(), "  angle_max: %.3f", angleMax_);
+        RCLCPP_INFO(this->get_logger(), "  angle_increment: %.3f", angleIncrement_);
+        RCLCPP_INFO(this->get_logger(), "  range_min: %.3f", rangeMin_);
+        RCLCPP_INFO(this->get_logger(), "  range_max: %.3f", rangeMax_);
+        RCLCPP_INFO(this->get_logger(), "  scan_angle_noise: %.3f", scanAngleNoise_);
+        RCLCPP_INFO(this->get_logger(), "  scan_range_noise: %.3f", scanRangeNoise_);
+        RCLCPP_INFO(this->get_logger(), "  valid_scan_rate_th: %.3f", validScanRateTH_);
+        RCLCPP_INFO(this->get_logger(), "  failure_positional_error_th: %.3f", failurePositionalErrorTH_);
+        RCLCPP_INFO(this->get_logger(), "  failure_angular_error_th: %.3f", failureAngularErrorTH_);
+        RCLCPP_INFO(this->get_logger(), "  positional_error_max: %.3f", positionalErrorMax_);
+        RCLCPP_INFO(this->get_logger(), "  angular_error_max: %.3f", angularErrorMax_);
 
         std::string cmd;
         int retVal;
@@ -124,44 +196,26 @@ public:
         failureAngularErrorTH_ *= M_PI / 180.0;
         angularErrorMax_ *= M_PI / 180.0;
 
-        mapSub_ = nh_.subscribe(mapName_, 1, &ClassifierDatasetGenerator::mapCB, this);
+        mapSub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
+            mapName_, 1, std::bind(&ClassifierDatasetGenerator::mapCB, this, std::placeholders::_1));
 
-        ros::Rate loopRate(10.0);
         int cnt = 0;
-        while (ros::ok()) {
-            ros::spinOnce();
-            if (gotMap_)
-                break;
+        rclcpp::Rate rate(10);
+        while (rclcpp::ok()) {
+            rclcpp::spin_some(this->get_node_base_interface());
+            if (gotMap_) break;
             cnt++;
-            if (cnt > 50) {
-                ROS_ERROR("Map data might not be published."
-                    " Expected map topic name is %s", mapName_.c_str());
-                exit(1);
+            if (cnt >= 300) {
+                RCLCPP_ERROR(this->get_logger(), "A map message might not be published.");
+                rclcpp::shutdown();
+                return;
             }
-            loopRate.sleep();
+            rate.sleep();
         }
-    }
+        RCLCPP_INFO(this->get_logger(), "Map data is received.");
+        RCLCPP_INFO(this->get_logger(), "Start generating dataset.");
 
-    void generateDataset(void) {
-        for (int i = 0; i < generateSampleNum_; ++i) {
-            std::vector<Obstacle> obstacles = generateObstacles();
-            nav_msgs::OccupancyGrid simMap = buildSimulationMap(obstacles);
-            Pose gtPose, successPose, failurePose;
-            generatePoses(gtPose, successPose, failurePose);
-            sensor_msgs::LaserScan scan = simulateScan(gtPose, simMap);
-            if (!isValidScan(scan)) {
-                ROS_INFO("Simulated scan is invalid.");
-                i--;
-                continue;
-            }
-            std::vector<double> successResidualErrors = getResidualErrors(successPose, scan);
-            std::vector<double> failureResidualErrors = getResidualErrors(failurePose, scan);
-            saveData(gtPose, successPose, failurePose, scan, successResidualErrors, failureResidualErrors);
-            if ((i + 1) % 10 == 0)
-                ROS_INFO("%.2lf [%%] process done.", (double)(i + 1) / (double)generateSampleNum_ * 100.0);
-            if (!ros::ok())
-                break;
-        }
+        generateDataset();
     }
 
     inline void setTrainDirs(std::vector<std::string> trainDirs) {
@@ -173,13 +227,13 @@ public:
     }
 
     void readTrainDataset(std::vector<Pose> &gtPoses, std::vector<Pose> &successPoses, std::vector<Pose> &failurePoses,
-        std::vector<sensor_msgs::LaserScan> &scans, std::vector<std::vector<double>> &successResidualErrors, std::vector<std::vector<double>> &failureResidualErrors)
+        std::vector<sensor_msgs::msg::LaserScan> &scans, std::vector<std::vector<double>> &successResidualErrors, std::vector<std::vector<double>> &failureResidualErrors)
     {
         readDataset(trainDirs_, gtPoses, successPoses, failurePoses, scans, successResidualErrors, failureResidualErrors);
     }
 
     void readTestDataset(std::vector<Pose> &gtPoses, std::vector<Pose> &successPoses, std::vector<Pose> &failurePoses,
-        std::vector<sensor_msgs::LaserScan> &scans, std::vector<std::vector<double>> &successResidualErrors, std::vector<std::vector<double>> &failureResidualErrors)
+        std::vector<sensor_msgs::msg::LaserScan> &scans, std::vector<std::vector<double>> &successResidualErrors, std::vector<std::vector<double>> &failureResidualErrors)
     {
         readDataset(testDirs_, gtPoses, successPoses, failurePoses, scans, successResidualErrors, failureResidualErrors);
     }
@@ -229,19 +283,19 @@ private:
             return -1;
     }
 
-    void mapCB(const nav_msgs::OccupancyGrid::ConstPtr &msg) {
+    void mapCB(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
         map_ = *msg;
 
         // perform distance transform to build the distance field
         mapWidth_ = msg->info.width;
         mapHeight_ = msg->info.height;
         mapResolution_ = msg->info.resolution;
-        tf::Quaternion q(msg->info.origin.orientation.x, 
+        tf2::Quaternion q(msg->info.origin.orientation.x, 
             msg->info.origin.orientation.y, 
             msg->info.origin.orientation.z,
             msg->info.origin.orientation.w);
         double roll, pitch, yaw;
-        tf::Matrix3x3 m(q);
+        tf2::Matrix3x3 m(q);
         m.getRPY(roll, pitch, yaw);
         mapOrigin_.setX(msg->info.origin.position.x);
         mapOrigin_.setY(msg->info.origin.position.y);
@@ -300,8 +354,8 @@ private:
         return obstacles;
     }
 
-    nav_msgs::OccupancyGrid buildSimulationMap(std::vector<Obstacle> obstacles) {
-        nav_msgs::OccupancyGrid simMap = map_;
+    nav_msgs::msg::OccupancyGrid buildSimulationMap(std::vector<Obstacle> obstacles) {
+        nav_msgs::msg::OccupancyGrid simMap = map_;
         for (int i = 0; i < (int)obstacles.size(); ++i) {
             double helfSize = obstacles[i].s_ / 2.0;
             for (double x = obstacles[i].x_ - helfSize; x <= obstacles[i].x_ + helfSize; x += mapResolution_) {
@@ -354,8 +408,8 @@ private:
         }
     }
 
-    sensor_msgs::LaserScan simulateScan(Pose gtPose, nav_msgs::OccupancyGrid simMap) {
-        sensor_msgs::LaserScan scan;
+    sensor_msgs::msg::LaserScan simulateScan(Pose gtPose, nav_msgs::msg::OccupancyGrid simMap) {
+        sensor_msgs::msg::LaserScan scan;
         scan.angle_min = angleMin_;
         scan.angle_max = angleMax_;
         scan.angle_increment = angleIncrement_;
@@ -389,7 +443,7 @@ private:
         return scan;
     }
 
-    bool isValidScan(sensor_msgs::LaserScan scan) {
+    bool isValidScan(sensor_msgs::msg::LaserScan scan) {
         int validScanNum = 0;
         for (int i = 0; i < (int)scan.ranges.size(); ++i) {
             double r = scan.ranges[i];
@@ -403,7 +457,7 @@ private:
             return false;
     }
 
-    std::vector<double> getResidualErrors(Pose pose, sensor_msgs::LaserScan scan) {
+    std::vector<double> getResidualErrors(Pose pose, sensor_msgs::msg::LaserScan scan) {
         int size = (int)scan.ranges.size();
         std::vector<double> residualErrors(size);
         for (int i = 0; i < size; ++i) {
@@ -427,7 +481,7 @@ private:
         return residualErrors;
     }
 
-    void saveData(Pose gtPose, Pose successPose, Pose failurePose, sensor_msgs::LaserScan scan, std::vector<double> successResidualErrors, std::vector<double> failureResidualErrors) {
+    void saveData(Pose gtPose, Pose successPose, Pose failurePose, sensor_msgs::msg::LaserScan scan, std::vector<double> successResidualErrors, std::vector<double> failureResidualErrors) {
         static bool isFirst = true;
         static int cnt = 0;
         std::string fname;
@@ -472,7 +526,7 @@ private:
     }
 
     void readDataset(std::vector<std::string> dirs, std::vector<Pose> &gtPoses, std::vector<Pose> &successPoses, std::vector<Pose> &failurePoses,
-        std::vector<sensor_msgs::LaserScan> &scans, std::vector<std::vector<double>> &successResidualErrors, std::vector<std::vector<double>> &failureResidualErrors)
+        std::vector<sensor_msgs::msg::LaserScan> &scans, std::vector<std::vector<double>> &successResidualErrors, std::vector<std::vector<double>> &failureResidualErrors)
     {
         FILE *fp;
         std::string fname;
@@ -489,7 +543,7 @@ private:
             retVal = fscanf(fp, "%s %lf", buf, &rangeMax_);
             retVal = fclose(fp);
 
-            sensor_msgs::LaserScan scan;
+            sensor_msgs::msg::LaserScan scan;
             scan.angle_min = angleMin_;
             scan.angle_max = angleMax_;
             scan.angle_increment = angleIncrement_;

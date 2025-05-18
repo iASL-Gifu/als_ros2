@@ -17,41 +17,18 @@
  * @author Naoki Akai
  ****************************************************************************/
 
-#include <ros/ros.h>
 #include <als_ros/SLAMER.h>
 
 int main(int argc, char **argv) {
-    if (argv[1] == NULL) {
-        ROS_ERROR("argv[1] must be a yaml file for a indoor semantic map (ism).");
-        exit(1);
+    if (argc < 2) {
+        std::cerr << "Error: argv[1] must be a YAML file for an indoor semantic map (ism)." << std::endl;
+        return 1;
     }
 
-    ros::init(argc, argv, "slamer");
-    als_ros::SLAMER slamer(argv[1]);
-    double localizationHz = slamer.getLocalizationHz();
-    ros::Rate loopRate(localizationHz);
+    rclcpp::init(argc, argv);
+    auto slammer = std::make_shared<als_ros::SLAMER>(argv[1]);
+    rclcpp::spin(slammer);
 
-    while (ros::ok()) {
-        ros::spinOnce();
-        slamer.updateParticlesByMotionModel();
-        slamer.setCanUpdateScan(false);
-        slamer.calculateLikelihoodsByMeasurementModel();
-        slamer.calculateLikelihoodsBySLAMER();
-        slamer.recognizeObjectsWithMapAssist();
-        slamer.calculateLikelihoodsByDecisionModel();
-        slamer.calculateGLSampledPosesLikelihood();
-        slamer.calculateAMCLRandomParticlesRate();
-        slamer.calculateEffectiveSampleSize();
-        slamer.estimatePose();
-        slamer.resampleParticles();
-        slamer.publishROSMessages();
-        slamer.publishSLAMERROSMessages();
-        slamer.broadcastTF();
-        // slamer.plotLikelihoodMap();
-        slamer.setCanUpdateScan(true);
-        slamer.printResult();
-        loopRate.sleep();
-    }
-
+    rclcpp::shutdown();
     return 0;
 }

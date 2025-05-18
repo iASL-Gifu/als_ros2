@@ -1,0 +1,10 @@
+<!-- mae_classifier_learning.launch -->
+<launch >
+    <arg name="yaml_file" default="$(find-pkg-share als_ros2)/config/mae_classifier_learning.yaml" />
+
+    <!-- Node -->
+    <!-- 信頼度を推定する分類機の学習 -->
+    <node pkg="als_ros2" name="mae_classifier_learning" exec="mae_classifier_learning" output="screen">
+        <param from="$(var yaml_file)" />
+    </node>
+</launch >

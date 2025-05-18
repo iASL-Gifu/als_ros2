@@ -1,0 +1,26 @@
+/**:
+  ros__parameters:
+    node_name: slamer
+    scan_name: "/scan"
+    odom_name: "/odom"
+    map_name: "/map"
+    ism_points_name: "/ism_points"
+    colored_scan_points_name: "/slamer_colored_scan_points"
+    line_objects_name: "/slamer_line_objects"
+    spatial_line_objects_name: "/slamer_spatial_line_objects"
+    publish_ism_points: true
+    publish_colored_scan_points: true
+    scan_range_max: 20.0
+    scan_map_reso: 0.05
+    scan_orientation_hist_reso: 5.0
+    min_scan_orientation_prob: 0.1
+    min_spatial_line_object_length: 0.5
+    max_spatial_line_object_length: 2.5
+    merge_points_dist: 0.5
+    initial_pose_x: 0.0
+    initial_pose_y: 0.0
+    initial_pose_yaw: -180.0
+    initial_noise_x: 0.02
+    initial_noise_y: 0.02
+    initial_noise_yaw: 0.01
+    measurement_model_type: 0

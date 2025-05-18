@@ -17,53 +17,63 @@
  * @author Naoki Akai
  ****************************************************************************/
 
-#include <ros/ros.h>
-#include <geometry_msgs/PoseStamped.h>
-#include <geometry_msgs/Vector3Stamped.h>
-#include <geometry_msgs/PoseArray.h>
-#include <sensor_msgs/LaserScan.h>
-#include <tf/transform_listener.h>
+#include <rclcpp/rclcpp.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/vector3_stamped.hpp>
+#include <geometry_msgs/msg/pose_array.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <cstdio>
+#include <cmath>
+#include <vector>
+#include <string>
 
 typedef struct {
     double x, y;
 } Point;
 
-class Evaluator {
+class Evaluator : public rclcpp::Node {
 private:
-    ros::NodeHandle nh_;
-    ros::Subscriber gtPoseSub_, reliabilitySub_, glPosesSub_, scanSub_;
+    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr gtPoseSub_;
+    rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr reliabilitySub_;
+    rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr glPosesSub_;
+    rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scanSub_;
     std::string mapFrame_, laserFrame_;
-    tf::TransformListener tfListener_;
-    std::vector<geometry_msgs::PoseStamped> gtPoses_;
-    std::vector<geometry_msgs::PoseArray> glPoses_;
-    std::vector<sensor_msgs::LaserScan> scans_;
+    std::shared_ptr<tf2_ros::TransformListener> tfListener_;
+    std::shared_ptr<tf2_ros::Buffer> tfBuffer_;
+    std::vector<geometry_msgs::msg::PoseStamped> gtPoses_;
+    std::vector<geometry_msgs::msg::PoseArray> glPoses_;
+    std::vector<sensor_msgs::msg::LaserScan> scans_;
     bool canUpdateGTPoses_, canUpdateGLPoses_, canUpdateScan_;
     bool saveGTPose_, saveGLPoses_, saveScan_;
 
 public:
-    Evaluator(void):
-        nh_("~"),
+    Evaluator(void): Node("evaluator"),
         mapFrame_("map"),
         laserFrame_("laser"),
         canUpdateGTPoses_(true),
         canUpdateGLPoses_(true),
-        canUpdateScan_(true),
-        tfListener_()
+        canUpdateScan_(true)
     {
-        gtPoseSub_ = nh_.subscribe("/scanned_ground_truth_pose", 1, &Evaluator::gtPoseCB, this);
-        reliabilitySub_ = nh_.subscribe("/reliability", 1, &Evaluator::reliabilityCB, this);
-        glPosesSub_ = nh_.subscribe("/gl_sampled_poses", 1, &Evaluator::glPosesCB, this);
-        scanSub_ = nh_.subscribe("/scan", 1, &Evaluator::scanCB, this);
+        gtPoseSub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
+            "/scanned_ground_truth_pose", 1, std::bind(&Evaluator::gtPoseCB, this, std::placeholders::_1));
+        reliabilitySub_ = this->create_subscription<geometry_msgs::msg::Vector3Stamped>(
+            "/reliability", 1, std::bind(&Evaluator::reliabilityCB, this, std::placeholders::_1));
+        glPosesSub_ = this->create_subscription<geometry_msgs::msg::PoseArray>(
+            "/gl_sampled_poses", 1, std::bind(&Evaluator::glPosesCB, this, std::placeholders::_1));
+        scanSub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
+            "/scan", 1, std::bind(&Evaluator::scanCB, this, std::placeholders::_1));
+        tfBuffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
+        tfBuffer_->setUsingDedicatedThread(true);
+        tfListener_ = std::make_shared<tf2_ros::TransformListener>(*tfBuffer_, this, false);
         saveGTPose_ = false;
         saveGLPoses_ = false;
         saveScan_ = false;
     }
 
-    void spin(void) {
-        ros::spin();
-    }
-
-    void gtPoseCB(const geometry_msgs::PoseStamped::ConstPtr &msg) {
+    void gtPoseCB(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
         if (!canUpdateGTPoses_)
             return;
         gtPoses_.insert(gtPoses_.begin(), *msg);
@@ -73,14 +83,14 @@ public:
 
     int getSynchronizedGTPoses(double time) {
         for (int i = 0; i < (int)gtPoses_.size(); ++i) {
-            double t = gtPoses_[i].header.stamp.toSec();
+            double t = rclcpp::Time(gtPoses_[i].header.stamp).seconds();
             if (t < time)
                 return i;
         }
         return -1;
     }
 
-    void glPosesCB(const geometry_msgs::PoseArray::ConstPtr &msg) {
+    void glPosesCB(const geometry_msgs::msg::PoseArray::SharedPtr msg) {
         if (!canUpdateGLPoses_)
             return;
         glPoses_.insert(glPoses_.begin(), *msg);
@@ -90,14 +100,14 @@ public:
 
     int getSynchronizedGLPoses(double time) {
         for (int i = 0; i < (int)glPoses_.size(); ++i) {
-            double t = glPoses_[i].header.stamp.toSec();
+            double t = rclcpp::Time(glPoses_[i].header.stamp).seconds();
             if (t < time)
                 return i;
         }
         return -1;
     }
 
-    void scanCB(const sensor_msgs::LaserScan::ConstPtr &msg) {
+    void scanCB(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
         if (!canUpdateScan_)
             return;
         scans_.insert(scans_.begin(), *msg);
@@ -107,7 +117,7 @@ public:
 
     int getSynchronizedScan(double time) {
         for (int i = 0; i < (int)scans_.size(); ++i) {
-            double t = scans_[i].header.stamp.toSec();
+            double t = rclcpp::Time(scans_[i].header.stamp).seconds();
             if (t < time)
                 return i;
         }
@@ -134,17 +144,17 @@ public:
         return arrowPoints;
     }
 
-    void reliabilityCB(const geometry_msgs::Vector3Stamped::ConstPtr &msg) {
+    void reliabilityCB(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg) {
         static bool isFirst = true;
         static double firstTime;
         static FILE *fp = fopen("/tmp/als_ros_reliability.txt", "w");
-        double time = msg->header.stamp.toSec();
+        double time = rclcpp::Time(msg->header.stamp).seconds();
         if (isFirst) {
             firstTime = time;
             isFirst = false;
         }
 
-        geometry_msgs::PoseStamped gtPose;
+        geometry_msgs::msg::PoseStamped gtPose;
         if (saveGTPose_) {
             canUpdateGTPoses_ = false;
             int gtPoseIdx = getSynchronizedGTPoses(time);
@@ -156,7 +166,7 @@ public:
             canUpdateGTPoses_ = true;
         }
 
-        geometry_msgs::PoseArray glPoses;
+        geometry_msgs::msg::PoseArray glPoses;
         if (saveGLPoses_) {
             canUpdateGLPoses_ = false;
             int glPoseIdx = getSynchronizedGLPoses(time);
@@ -168,7 +178,7 @@ public:
             canUpdateGLPoses_ = true;
         }
 
-        sensor_msgs::LaserScan scan;
+        sensor_msgs::msg::LaserScan scan;
         if (saveScan_) {
             canUpdateScan_ = false;
             int scanIdx = getSynchronizedScan(time);
@@ -180,37 +190,32 @@ public:
             canUpdateScan_ = true;
         }
 
-        tf::StampedTransform tfMap2Laser;
+        geometry_msgs::msg::TransformStamped tfMap2Laser;
         try {
-            ros::Time now = msg->header.stamp;
-            tfListener_.waitForTransform(mapFrame_, laserFrame_, now, ros::Duration(0.2));
-            tfListener_.lookupTransform(mapFrame_, laserFrame_, now, tfMap2Laser);
-        } catch (tf::TransformException ex) {
+            tfMap2Laser = tfBuffer_->lookupTransform(mapFrame_, laserFrame_, msg->header.stamp);
+        } catch (tf2::TransformException &ex) {
             return;
         }
 
         double gtX, gtY, gtYaw;
         if (saveGTPose_) {
-            tf::Quaternion gtQuat(gtPose.pose.orientation.x,
+            tf2::Quaternion gtQuat(gtPose.pose.orientation.x,
                 gtPose.pose.orientation.y,
                 gtPose.pose.orientation.z,
                 gtPose.pose.orientation.w);
             double gtRoll, gtPitch;
-            tf::Matrix3x3 gtRotMat(gtQuat);
-            gtRotMat.getRPY(gtRoll, gtPitch, gtYaw);
+            tf2::Matrix3x3(gtQuat).getRPY(gtRoll, gtPitch, gtYaw);
             gtX = gtPose.pose.position.x;
             gtY = gtPose.pose.position.y;
         }
 
-        tf::Quaternion quat(tfMap2Laser.getRotation().x(),
-            tfMap2Laser.getRotation().y(),
-            tfMap2Laser.getRotation().z(),
-            tfMap2Laser.getRotation().w());
+        tf2::Transform tf_map2laser;
+        tf2::fromMsg(tfMap2Laser.transform, tf_map2laser);
+        tf2::Quaternion quat = tf_map2laser.getRotation();
         double roll, pitch, yaw;
-        tf::Matrix3x3 rotMat(quat);
-        rotMat.getRPY(roll, pitch, yaw);
-        double x = tfMap2Laser.getOrigin().x();
-        double y = tfMap2Laser.getOrigin().y();
+        tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
+        double x = tfMap2Laser.transform.translation.x;
+        double y = tfMap2Laser.transform.translation.y;
 
         if (saveGTPose_) {
             double dx = gtX - x;
@@ -257,13 +262,12 @@ public:
             double wo = 1.0 / (double)glPoses.poses.size();
             fp2 = fopen("/tmp/als_ros_gl_sampled_poses.txt", "w");
             for (int i = 0; i < (int)glPoses.poses.size(); ++i) {
-                tf::Quaternion quat(glPoses.poses[i].orientation.x,
+                tf2::Quaternion quat(glPoses.poses[i].orientation.x,
                     glPoses.poses[i].orientation.y,
                     glPoses.poses[i].orientation.z,
                     glPoses.poses[i].orientation.w);
                 double roll, pitch, yaw;
-                tf::Matrix3x3 rotMat(quat);
-                rotMat.getRPY(roll, pitch, yaw);
+                tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
                 double x = glPoses.poses[i].position.x;
                 double y = glPoses.poses[i].position.y;
                 std::vector<Point> arrowPoints = makeArrowPoints(x, y, yaw, 1.0);
@@ -308,8 +312,9 @@ public:
 }; // class Evaluator
 
 int main(int argc, char **argv) {
-    ros::init(argc, argv, "evaluator");
-    Evaluator node;
-    node.spin();
+    rclcpp::init(argc, argv);
+    rclcpp::spin(std::make_shared<Evaluator>());
+
+    rclcpp::shutdown();
     return 0;
 }

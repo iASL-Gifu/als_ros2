@@ -1,76 +1,147 @@
-cmake_minimum_required(VERSION 3.0.2)
-project(als_ros)
+cmake_minimum_required(VERSION 3.14)
+project(als_ros2)
 
-find_package(catkin REQUIRED COMPONENTS
-  cv_bridge
-  pcl_ros
-  pcl_conversions
-  geometry_msgs
-  nav_msgs
-  roscpp
-  rospy
-  sensor_msgs
-  std_msgs
-  tf
-)
-
+# ROS2 packages
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(PCL REQUIRED)
-
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(YAMLCPP yaml-cpp QUIET)
-if(NOT YAMLCPP_FOUND)
-  find_package(yaml-cpp 0.6 REQUIRED)
-  set(YAMLCPP_INCLUDE_DIRS ${YAML_CPP_INCLUDE_DIR})
-  set(YAMLCPP_LIBRARIES ${YAML_CPP_LIBRARIES})
-  add_definitions(-DHAVE_YAMLCPP_GT_0_5_0)
-else()
-  if(YAMLCPP_VERSION VERSION_GREATER "0.5.0")
-    add_definitions(-DHAVE_YAMLCPP_GT_0_5_0)
-  endif()
-  link_directories(${YAMLCPP_LIBRARY_DIRS})
-endif()
-
-catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES als
-#  CATKIN_DEPENDS cv_bridge geometry_msgs nav_msgs roscpp rospy sensor_msgs std_msgs tf tf_conversions
-#  DEPENDS system_lib
-)
+find_package(yaml-cpp REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(pcl_conversions REQUIRED)
 
 include_directories(
-  ${catkin_INCLUDE_DIRS}
+  include
   ${OpenCV_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
-  ${SDL_INCLUDE_DIR}
-  ${SDL_IMAGE_INCLUDE_DIRS}
-  ${YAMLCPP_INCLUDE_DIRS}
-  "${PROJECT_SOURCE_DIR}/include"
 )
 
 add_executable(mcl src/mcl.cpp)
-target_link_libraries(mcl ${catkin_LIBRARIES} ${OpenCV_LIBRARIES} ${YAMLCPP_LIBRARIES})
+ament_target_dependencies(mcl
+  rclcpp
+  cv_bridge
+  geometry_msgs
+  sensor_msgs
+  nav_msgs
+  visualization_msgs
+  tf2_ros
+  tf2_geometry_msgs
+)
+target_link_libraries(mcl ${OpenCV_LIBRARIES} ${PCL_LIBRARIES} yaml-cpp)
 
 add_executable(sm src/sm.cpp)
-target_link_libraries(sm ${catkin_LIBRARIES} ${OpenCV_LIBRARIES} ${YAMLCPP_LIBRARIES})
+ament_target_dependencies(sm
+  rclcpp
+  cv_bridge
+  geometry_msgs
+  sensor_msgs
+  nav_msgs
+  tf2_ros
+  tf2_geometry_msgs
+  visualization_msgs
+)
+target_link_libraries(sm ${OpenCV_LIBRARIES} yaml-cpp)
 
 add_executable(mrf_failure_detector src/mrf_failure_detector.cpp)
-target_link_libraries(mrf_failure_detector ${catkin_LIBRARIES})
+ament_target_dependencies(mrf_failure_detector
+  rclcpp
+  sensor_msgs
+  geometry_msgs
+  visualization_msgs
+)
+target_link_libraries(mrf_failure_detector yaml-cpp)
 
 add_executable(gl_pose_sampler src/gl_pose_sampler.cpp)
-target_link_libraries(gl_pose_sampler ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
+ament_target_dependencies(gl_pose_sampler
+  rclcpp
+  tf2_ros
+  tf2_geometry_msgs
+  geometry_msgs
+  sensor_msgs
+  nav_msgs
+  visualization_msgs
+  cv_bridge
+)
+target_link_libraries(gl_pose_sampler ${OpenCV_LIBRARIES})
 
 add_executable(classifier_dataset_generator src/classifier_dataset_generator.cpp)
-target_link_libraries(classifier_dataset_generator ${OpenCV_LIBRARIES} ${catkin_LIBRARIES})
+ament_target_dependencies(classifier_dataset_generator
+  rclcpp
+  tf2_geometry_msgs
+  sensor_msgs
+  nav_msgs
+  cv_bridge
+)
+target_link_libraries(classifier_dataset_generator ${OpenCV_LIBRARIES})
 
 add_executable(mae_classifier_learning src/mae_classifier_learning.cpp)
-target_link_libraries(mae_classifier_learning ${OpenCV_LIBRARIES} ${catkin_LIBRARIES} ${YAMLCPP_LIBRARIES})
+ament_target_dependencies(mae_classifier_learning
+  rclcpp
+  tf2_geometry_msgs
+  sensor_msgs
+  nav_msgs
+)
+target_link_libraries(mae_classifier_learning ${OpenCV_LIBRARIES} yaml-cpp)
 
 add_executable(evaluator src/evaluator.cpp)
-target_link_libraries(evaluator ${catkin_LIBRARIES})
+ament_target_dependencies(evaluator
+  rclcpp
+  geometry_msgs
+  sensor_msgs
+  tf2_ros
+  tf2_geometry_msgs
+)
+target_link_libraries(evaluator yaml-cpp)
 
 add_executable(scan2pc src/scan2pc.cpp)
-target_link_libraries(scan2pc ${catkin_LIBRARIES})
+ament_target_dependencies(scan2pc
+  rclcpp
+  sensor_msgs
+  geometry_msgs
+)
+target_link_libraries(scan2pc yaml-cpp)
 
 add_executable(slamer src/slamer.cpp)
-target_link_libraries(slamer ${catkin_LIBRARIES} ${OpenCV_LIBRARIES} ${YAMLCPP_LIBRARIES} ${PCL_LIBRARY_DIRS})
+ament_target_dependencies(slamer
+  rclcpp
+  sensor_msgs
+  geometry_msgs
+  nav_msgs
+  std_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+  visualization_msgs
+  cv_bridge
+  pcl_conversions
+)
+target_link_libraries(slamer ${OpenCV_LIBRARIES} yaml-cpp ${PCL_LIBRARIES})
+
+install(TARGETS
+  mcl
+  sm
+  mrf_failure_detector
+  gl_pose_sampler
+  classifier_dataset_generator
+  mae_classifier_learning
+  evaluator
+  scan2pc
+  slamer
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(DIRECTORY
+  launch
+  config
+  maps
+  DESTINATION share/${PROJECT_NAME})
+
+ament_package()

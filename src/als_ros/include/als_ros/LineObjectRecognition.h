@@ -22,10 +22,11 @@
 
 #include <string>
 #include <vector>
-#include <sensor_msgs/LaserScan.h>
-#include <sensor_msgs/PointCloud2.h>
+#include <sensor_msgs/msg/laser_scan.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
 #include <opencv2/opencv.hpp>
 #include <als_ros/Point.h>
+
 
 namespace als_ros {
 
@@ -142,7 +143,7 @@ public:
         b /= 255.0f;
     }
 
-    void recognizeLineObjects(sensor_msgs::LaserScan scan, std::vector<LineObject> &lineObjects, std::vector<std::vector<double>> &lineObjectsProbs,
+    void recognizeLineObjects(sensor_msgs::msg::LaserScan scan, std::vector<LineObject> &lineObjects, std::vector<std::vector<double>> &lineObjectsProbs,
         std::vector<LineObject> &spatialLineObjects, std::vector<std::vector<double>> &spatialLineObjectsProbs)
     {
         cv::Mat scanImg = makeScanImage(scan);
@@ -173,7 +174,7 @@ public:
         // writeLineObjects(spatialLineObjects, "/tmp/spatial_line_objects.txt");
     }
 
-    sensor_msgs::PointCloud2 getColoredScanImgPoints(std::vector<LineObject> lineObjects, std::vector<std::vector<double>> lineObjectsProbs) {
+    sensor_msgs::msg::PointCloud2 getColoredScanImgPoints(std::vector<LineObject> lineObjects, std::vector<std::vector<double>> lineObjectsProbs) {
         std::vector<cv::Mat> lineImgs(4);
         for (int i = 0; i < (int)lineImgs.size(); ++i)
             lineImgs[i] = cv::Mat::ones(scanMapHeight_, scanMapWidth_, CV_8UC1);
@@ -249,7 +250,7 @@ public:
         coloredPoints->width = coloredPoints->points.size();
         coloredPoints->height = 1;
 
-        sensor_msgs::PointCloud2 coloredPointsMsg;
+        sensor_msgs::msg::PointCloud2 coloredPointsMsg;
         pcl::toROSMsg(*coloredPoints.get(), coloredPointsMsg);
         return coloredPointsMsg;
     }
@@ -265,7 +266,7 @@ private:
         *y = (double)(scanMapHeight_ / 2 - v) * scanMapReso_;
     }
 
-    cv::Mat makeScanImage(sensor_msgs::LaserScan scan) {
+    cv::Mat makeScanImage(sensor_msgs::msg::LaserScan scan) {
         scanMapWidth_ = (int)(2.0 * scanRangeMax_ / scanMapReso_);
         scanMapHeight_ = (int)(2.0 * scanRangeMax_ / scanMapReso_);
         scanAngleReso_ = scan.angle_increment;
@@ -646,7 +647,7 @@ private:
         return mergedLineObjects;
     }
 
-    void plotScan(sensor_msgs::LaserScan scan, std::string file) {
+    void plotScan(sensor_msgs::msg::LaserScan scan, std::string file) {
         FILE *fp = fopen(file.c_str(), "w");
         for (int i = 0; i < (int)scan.ranges.size(); ++i) {
             double r = scan.ranges[i];

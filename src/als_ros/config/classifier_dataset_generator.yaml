@@ -1,0 +1,23 @@
+/**:
+  ros__parameters:
+    save_dir: "/tmp/classifier_dataset/gifu_univ_7th"
+    generate_sample_num: 2000               # 生成するサンプル数（GT・成功・失敗の各データセット）
+    obstacles_num: 20                       # シミュレーションマップに配置する障害物の数
+
+    angle_min: -135.0                       # スキャンの開始角度（度）
+    angle_max: 135.0                        # スキャンの終了角度（度）
+    angle_increment: 0.25                   # スキャンの角度分解能（度）
+
+    range_min: 0.02                         # スキャンの最小測定距離（m）
+    range_max: 30.0                         # スキャンの最大測定距離（m）
+
+    scan_angle_noise: 0.001                 # スキャン角度に加えるノイズ（rad）
+    scan_range_noise: 0.02                  # スキャン距離に加えるノイズ（m）
+
+    valid_scan_rate_th: 0.5                 # 有効ビーム率のしきい値（この割合を下回るとスキャンを無効とする）
+
+    failure_positional_error_th: 0.2        # 成功・失敗を分ける位置誤差のしきい値（m）
+    failure_angular_error_th: 2.0           # 成功・失敗を分ける角度誤差のしきい値（度）
+
+    positional_error_max: 0.5               # 失敗サンプル生成における最大位置誤差（m）
+    angular_error_max: 5.0                  # 失敗サンプル生成における最大角度誤差（度）

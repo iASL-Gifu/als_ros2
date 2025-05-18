@@ -22,37 +22,62 @@
 
 #include <string>
 #include <vector>
-#include <ros/ros.h>
+#include <rclcpp/rclcpp.hpp>
 #include <opencv2/opencv.hpp>
-#include <geometry_msgs/PoseStamped.h>
-#include <geometry_msgs/PoseArray.h>
-#include <geometry_msgs/PoseWithCovarianceStamped.h>
-#include <sensor_msgs/LaserScan.h>
-#include <nav_msgs/OccupancyGrid.h>
-#include <nav_msgs/Odometry.h>
-#include <tf/transform_broadcaster.h>
-#include <tf/transform_listener.h>
-#include <tf2/convert.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
-#include <visualization_msgs/Marker.h>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/pose_array.hpp>
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
+#include <nav_msgs/msg/occupancy_grid.hpp>
+#include <nav_msgs/msg/odometry.hpp>
+#include <visualization_msgs/msg/marker.hpp>
+#include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <als_ros/Pose.h>
 #include <als_ros/Particle.h>
 #include <als_ros/MAEClassifier.h>
 
+
 namespace als_ros {
 
-class MCL {
+class MCL : public rclcpp::Node {
 private:
-    // node handler
-    ros::NodeHandle nh_;
-
     // subscribers
-    std::string scanName_, odomName_, mapName_, glSampledPosesName_;
-    ros::Subscriber scanSub_, odomSub_, mapSub_, glSampledPosesPub_, initialPoseSub_;
+    std::string scanName_;
+    rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scanSub_;
+
+    std::string odomName_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odomSub_;
+
+    std::string mapName_;
+    rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr mapSub_;
+
+    std::string glSampledPosesName_;
+    rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr glSampledPosesSub_;
+
+    std::string initialPoseName_;
+    rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initialPoseSub_;
 
     // publishers
-    std::string poseName_, particlesName_, unknownScanName_, residualErrorsName_, reliabilityName_, reliabilityMarkerName_;
-    ros::Publisher posePub_, particlesPub_, unknownScanPub_, residualErrorsPub_, reliabilityPub_, reliabilityMarkerPub_;
+    std::string poseName_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr posePub_;
+
+    std::string particlesName_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr particlesPub_;
+
+    std::string unknownScanName_;
+    rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr unknownScanPub_;
+
+    std::string residualErrorsName_;
+    rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr residualErrorsPub_;
+
+    std::string reliabilityName_;
+    rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr reliabilityPub_;
+
+    std::string reliabilityMarkerName_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr reliabilityMarkerPub_;
 
     // tf frames
     std::string laserFrame_, baseLinkFrame_, mapFrame_, odomFrame_;
@@ -61,7 +86,7 @@ private:
     // poses
     double initialPoseX_, initialPoseY_, initialPoseYaw_;
     Pose mclPose_, baseLink2Laser_, odomPose_;
-    ros::Time mclPoseStamp_, odomPoseStamp_, glSampledPosesStamp_;
+    rclcpp::Time mclPoseStamp_, odomPoseStamp_, glSampledPosesStamp_;
 
     // particles
     int particlesNum_;
@@ -72,7 +97,7 @@ private:
     std::vector<double> randomParticlesNoise_;
     int glParticlesNum_;
     std::vector<Particle> glParticles_;
-    geometry_msgs::PoseArray glSampledPoses_;
+    geometry_msgs::msg::PoseArray glSampledPoses_;
     bool canUpdateGLSampledPoses_, canUseGLSampledPoses_, isGLSampledPosesUpdated_;
     double glSampledPoseTimeTH_, gmmPositionalVariance_, gmmAngularVariance_;
     double predDistUnifRate_;
@@ -92,7 +117,7 @@ private:
     bool useOmniDirectionalModel_;
 
     // measurements
-    sensor_msgs::LaserScan scan_, unknownScan_;
+    sensor_msgs::msg::LaserScan scan_, unknownScan_;
     bool canUpdateScan_;
     std::vector<bool> likelihoodShiftedSteps_;
 
@@ -116,8 +141,9 @@ private:
     int maxLikelihoodParticleIdx_;
 
     // other parameters
-    tf::TransformBroadcaster tfBroadcaster_;
-    tf::TransformListener tfListener_;
+    std::shared_ptr<tf2_ros::TransformBroadcaster> tfBroadcaster_;
+    std::shared_ptr<tf2_ros::TransformListener> tfListener_;
+    std::shared_ptr<tf2_ros::Buffer> tfBuffer_;
     bool isInitialized_;
     double localizationHz_;
     double transformTolerance_;
@@ -144,6 +170,10 @@ private:
     // constant parameters
     const double rad2deg_;
 
+    // Timer
+    rclcpp::TimerBase::SharedPtr timer_;
+    bool startMCL_;
+
 public:
     // inline setting functions
     inline void setCanUpdateScan(bool canUpdateScan) {
@@ -158,7 +188,7 @@ public:
             double invalidScanRate = (double)invalidScanNum / (int)scan_.ranges.size();
             if (invalidScanRate > 0.95) {
                 scanMightInvalid_ = true;
-                ROS_ERROR("MCL scan might invalid.");
+                RCLCPP_ERROR(this->get_logger(), "MCL scan might invalid.");
             } else {
                 scanMightInvalid_ = false;
             }
@@ -168,7 +198,7 @@ public:
     // inline getting functions
     inline double getLocalizationHz(void) { return localizationHz_; }
     inline std::string getMapFrame(void) { return mapFrame_; }
-    inline sensor_msgs::LaserScan getScan(void) { return scan_; }
+    inline sensor_msgs::msg::LaserScan getScan(void) { return scan_; }
     inline int getParticlesNum(void) { return particlesNum_; }
     inline Pose getParticlePose(int i) { return particles_[i].getPose(); }
     inline double getParticleW(int i) { return particles_[i].getW(); }
@@ -181,7 +211,7 @@ public:
     inline double getMeasurementModelRandom(void) { return measurementModelRandom_; }
 
     // inline setting functions
-    inline void setMCLPoseStamp(ros::Time stamp) { mclPoseStamp_ = stamp; }
+    inline void setMCLPoseStamp(rclcpp::Time stamp) { mclPoseStamp_ = stamp; }
     inline void setParticleW(int i, double w) { particles_[i].setW(w); }
     inline void setTotalLikelihood(double totalLikelihood) { totalLikelihood_ = totalLikelihood; }
     inline void setAverageLikelihood(double averageLikelihood) { averageLikelihood_ = averageLikelihood; }
@@ -192,8 +222,7 @@ public:
     void clearLikelihoodShiftedSteps(void) { likelihoodShiftedSteps_.clear(); }
     void addLikelihoodShiftedSteps(bool flag) { likelihoodShiftedSteps_.push_back(flag); }
 
-    MCL(void):
-        nh_("~"),
+    MCL() : Node("mcl"),
         scanName_("/scan"),
         odomName_("/odom"),
         mapName_("/map"),
@@ -272,108 +301,330 @@ public:
         isGLSampledPosesUpdated_(false),
         writePose_(false),
         poseLogFile_("/tmp/als_ros_pose.txt"),
-        tfListener_(),
-        rad2deg_(180.0 / M_PI)
+        rad2deg_(180.0 / M_PI),
+        startMCL_(true)
     {
-        // topic and frame names
-        nh_.param("scan_name", scanName_, scanName_);
-        nh_.param("odom_name", odomName_, odomName_);
-        nh_.param("map_name", mapName_, mapName_);
-        nh_.param("pose_name", poseName_, poseName_);
-        nh_.param("particles_name", particlesName_, particlesName_);
-        nh_.param("unknown_scan_name", unknownScanName_, unknownScanName_);  
-        nh_.param("residual_errors_name", residualErrorsName_, residualErrorsName_);
-        nh_.param("reliability_name", reliabilityName_, reliabilityName_);
-        nh_.param("gl_sampled_poses_name", glSampledPosesName_, glSampledPosesName_);
-        nh_.param("laser_frame", laserFrame_, laserFrame_);
-        nh_.param("base_link_frame", baseLinkFrame_, baseLinkFrame_);
-        nh_.param("map_frame", mapFrame_, mapFrame_);
-        nh_.param("odom_frame", odomFrame_, odomFrame_);
-        nh_.param("broadcast_tf", broadcastTF_, broadcastTF_);
-        nh_.param("use_odom_tf", useOdomTF_, useOdomTF_);
+        RCLCPP_INFO(this->get_logger(), "MCL is initializing...");
 
-        // particle filter parameters
-        nh_.param("initial_pose_x", initialPoseX_, initialPoseX_);
-        nh_.param("initial_pose_y", initialPoseY_, initialPoseY_);
-        nh_.param("initial_pose_yaw", initialPoseYaw_, initialPoseYaw_);
-        nh_.param("initial_noise_x", initialNoiseX_, initialNoiseX_);
-        nh_.param("initial_noise_y", initialNoiseY_, initialNoiseY_);
-        nh_.param("initial_noise_yaw", initialNoiseYaw_, initialNoiseYaw_);
-        nh_.param("particle_num", particlesNum_, particlesNum_);
-        nh_.param("use_augmented_mcl", useAugmentedMCL_, useAugmentedMCL_);
-        nh_.param("add_random_particles_in_resampling", addRandomParticlesInResampling_, addRandomParticlesInResampling_);
-        nh_.param("random_particles_rate", randomParticlesRate_, randomParticlesRate_);
-        nh_.param("random_particles_noise", randomParticlesNoise_, randomParticlesNoise_);
+        // topic and frame names
+        this->declare_parameter<std::string>("scan_name", scanName_);
+        this->get_parameter("scan_name", scanName_);
+
+        this->declare_parameter<std::string>("odom_name", odomName_);
+        this->get_parameter("odom_name", odomName_);
+
+        this->declare_parameter<std::string>("map_name", mapName_);
+        this->get_parameter("map_name", mapName_);
+
+        this->declare_parameter<std::string>("pose_name", poseName_);
+        this->get_parameter("pose_name", poseName_);
+
+        this->declare_parameter<std::string>("particles_name", particlesName_);
+        this->get_parameter("particles_name", particlesName_);
+
+        this->declare_parameter<std::string>("unknown_scan_name", unknownScanName_);
+        this->get_parameter("unknown_scan_name", unknownScanName_);
+
+        this->declare_parameter<std::string>("residual_errors_name", residualErrorsName_);
+        this->get_parameter("residual_errors_name", residualErrorsName_);
+
+        this->declare_parameter<std::string>("reliability_name", reliabilityName_);
+        this->get_parameter("reliability_name", reliabilityName_);
+
+        this->declare_parameter<std::string>("gl_sampled_poses_name", glSampledPosesName_);
+        this->get_parameter("gl_sampled_poses_name", glSampledPosesName_);
+
+        this->declare_parameter<std::string>("laser_frame", laserFrame_);
+        this->get_parameter("laser_frame", laserFrame_);
+
+        this->declare_parameter<std::string>("base_link_frame", baseLinkFrame_);
+        this->get_parameter("base_link_frame", baseLinkFrame_);
+
+        this->declare_parameter<std::string>("map_frame", mapFrame_);
+        this->get_parameter("map_frame", mapFrame_);
+
+        this->declare_parameter<std::string>("odom_frame", odomFrame_);
+        this->get_parameter("odom_frame", odomFrame_);
+
+        this->declare_parameter<bool>("broadcast_tf", broadcastTF_);
+        this->get_parameter("broadcast_tf", broadcastTF_);
+
+        this->declare_parameter<bool>("use_odom_tf", useOdomTF_);
+        this->get_parameter("use_odom_tf", useOdomTF_);
+
+        // Particle filter parameters
+        this->declare_parameter<double>("initial_pose_x", initialPoseX_);
+        this->get_parameter("initial_pose_x", initialPoseX_);
+
+        this->declare_parameter<double>("initial_pose_y", initialPoseY_);
+        this->get_parameter("initial_pose_y", initialPoseY_);
+
+        this->declare_parameter<double>("initial_pose_yaw", initialPoseYaw_);
+        this->get_parameter("initial_pose_yaw", initialPoseYaw_);
+
+        this->declare_parameter<double>("initial_noise_x", initialNoiseX_);
+        this->get_parameter("initial_noise_x", initialNoiseX_);
+
+        this->declare_parameter<double>("initial_noise_y", initialNoiseY_);
+        this->get_parameter("initial_noise_y", initialNoiseY_);
+
+        this->declare_parameter<double>("initial_noise_yaw", initialNoiseYaw_);
+        this->get_parameter("initial_noise_yaw", initialNoiseYaw_);
+
+        this->declare_parameter<int>("particle_num", particlesNum_);
+        this->get_parameter("particle_num", particlesNum_);
+
+        this->declare_parameter<bool>("use_augmented_mcl", useAugmentedMCL_);
+        this->get_parameter("use_augmented_mcl", useAugmentedMCL_);
+
+        this->declare_parameter<bool>("add_random_particles_in_resampling", addRandomParticlesInResampling_);
+        this->get_parameter("add_random_particles_in_resampling", addRandomParticlesInResampling_);
+
+        this->declare_parameter<double>("random_particles_rate", randomParticlesRate_);
+        this->get_parameter("random_particles_rate", randomParticlesRate_);
+
+        // vector パラメータ（例: std::vector<double>）もサポートされます
+        this->declare_parameter<std::vector<double>>("random_particles_noise", randomParticlesNoise_);
+        this->get_parameter("random_particles_noise", randomParticlesNoise_);
 
         // motion
-        nh_.param("odom_noise_ddm", odomNoiseDDM_, odomNoiseDDM_);
-        nh_.param("odom_noise_odm", odomNoiseODM_, odomNoiseODM_);
-        nh_.param("use_omni_directional_model", useOmniDirectionalModel_, useOmniDirectionalModel_);
+        this->declare_parameter<std::vector<double>>("odom_noise_ddm", odomNoiseDDM_);
+        this->get_parameter("odom_noise_ddm", odomNoiseDDM_);
+
+        this->declare_parameter<std::vector<double>>("odom_noise_odm", odomNoiseODM_);
+        this->get_parameter("odom_noise_odm", odomNoiseODM_);
+
+        this->declare_parameter<bool>("use_omni_directional_model", useOmniDirectionalModel_);
+        this->get_parameter("use_omni_directional_model", useOmniDirectionalModel_);
 
         // measurement model
-        nh_.param("measurement_model_type", measurementModelType_, measurementModelType_);
-        nh_.param("scan_step", scanStep_, scanStep_);
-        nh_.param("z_hit", zHit_, zHit_);
-        nh_.param("z_short", zShort_, zShort_);
-        nh_.param("z_max", zMax_, zMax_);
-        nh_.param("z_rand", zRand_, zRand_);
-        nh_.param("var_hit", varHit_, varHit_);
-        nh_.param("lambda_short", lambdaShort_, lambdaShort_);
-        nh_.param("lambda_unknown", lambdaUnknown_, lambdaUnknown_);
-        nh_.param("known_class_prior", pKnownPrior_, pKnownPrior_);
-        nh_.param("unknown_scan_prob_threshold", unknownScanProbThreshold_, unknownScanProbThreshold_);
-        nh_.param("alpha_slow", alphaSlow_, alphaSlow_);
-        nh_.param("alpha_fast", alphaFast_, alphaFast_);
-        nh_.param("reject_unknown_scan", rejectUnknownScan_, rejectUnknownScan_);
-        nh_.param("publish_unknown_scan", publishUnknownScan_, publishUnknownScan_);
-        nh_.param("publish_residual_errors", publishResidualErrors_, publishResidualErrors_);
-        nh_.param("resample_threshold_ess", resampleThresholdESS_, resampleThresholdESS_);
-        nh_.param("resample_thresholds", resampleThresholds_, resampleThresholds_);
+        this->declare_parameter<int>("measurement_model_type", measurementModelType_);
+        this->get_parameter("measurement_model_type", measurementModelType_);
+
+        this->declare_parameter<int>("scan_step", scanStep_);
+        this->get_parameter("scan_step", scanStep_);
+
+        this->declare_parameter<double>("z_hit", zHit_);
+        this->get_parameter("z_hit", zHit_);
+
+        this->declare_parameter<double>("z_short", zShort_);
+        this->get_parameter("z_short", zShort_);
+
+        this->declare_parameter<double>("z_max", zMax_);
+        this->get_parameter("z_max", zMax_);
+
+        this->declare_parameter<double>("z_rand", zRand_);
+        this->get_parameter("z_rand", zRand_);
+
+        this->declare_parameter<double>("var_hit", varHit_);
+        this->get_parameter("var_hit", varHit_);
+
+        this->declare_parameter<double>("lambda_short", lambdaShort_);
+        this->get_parameter("lambda_short", lambdaShort_);
+
+        this->declare_parameter<double>("lambda_unknown", lambdaUnknown_);
+        this->get_parameter("lambda_unknown", lambdaUnknown_);
+
+        this->declare_parameter<double>("known_class_prior", pKnownPrior_);
+        this->get_parameter("known_class_prior", pKnownPrior_);
+
+        this->declare_parameter<double>("unknown_scan_prob_threshold", unknownScanProbThreshold_);
+        this->get_parameter("unknown_scan_prob_threshold", unknownScanProbThreshold_);
+
+        this->declare_parameter<double>("alpha_slow", alphaSlow_);
+        this->get_parameter("alpha_slow", alphaSlow_);
+
+        this->declare_parameter<double>("alpha_fast", alphaFast_);
+        this->get_parameter("alpha_fast", alphaFast_);
+
+        this->declare_parameter<bool>("reject_unknown_scan", rejectUnknownScan_);
+        this->get_parameter("reject_unknown_scan", rejectUnknownScan_);
+
+        this->declare_parameter<bool>("publish_unknown_scan", publishUnknownScan_);
+        this->get_parameter("publish_unknown_scan", publishUnknownScan_);
+
+        this->declare_parameter<bool>("publish_residual_errors", publishResidualErrors_);
+        this->get_parameter("publish_residual_errors", publishResidualErrors_);
+
+        this->declare_parameter<double>("resample_threshold_ess", resampleThresholdESS_);
+        this->get_parameter("resample_threshold_ess", resampleThresholdESS_);
+
+        this->declare_parameter<std::vector<double>>("resample_thresholds", resampleThresholds_);
+        this->get_parameter("resample_thresholds", resampleThresholds_);
+
         pUnknownPrior_ = 1.0 - pKnownPrior_;
 
         // reliability estimation
-        nh_.param("estimate_reliability", estimateReliability_, estimateReliability_);
-        nh_.param("rel_trans_ddm", relTransDDM_, relTransDDM_);
-        nh_.param("rel_trans_odm", relTransODM_, relTransODM_);
+        this->declare_parameter<bool>("estimate_reliability", estimateReliability_);
+        this->get_parameter("estimate_reliability", estimateReliability_);
+
+        this->declare_parameter<std::vector<double>>("rel_trans_ddm", relTransDDM_);
+        this->get_parameter("rel_trans_ddm", relTransDDM_);
+
+        this->declare_parameter<std::vector<double>>("rel_trans_odm", relTransODM_);
+        this->get_parameter("rel_trans_odm", relTransODM_);
 
         // failure detector
-        nh_.param("classifier_type", classifierType_, classifierType_);
-        nh_.param("mae_classifier_dir", maeClassifierDir_, maeClassifierDir_);
+        this->declare_parameter<int>("classifier_type", classifierType_);
+        this->get_parameter("classifier_type", classifierType_);
+
+        this->declare_parameter<std::string>("mae_classifier_dir", maeClassifierDir_);
+        this->get_parameter("mae_classifier_dir", maeClassifierDir_);
 
         // global-localization-based pose sampling
-        nh_.param("use_gl_pose_sampler", useGLPoseSampler_, useGLPoseSampler_);
-        nh_.param("fuse_gl_pose_sampler_only_unreliable", fuseGLPoseSamplerOnlyUnreliable_, fuseGLPoseSamplerOnlyUnreliable_);
-        nh_.param("gl_sampled_pose_time_th", glSampledPoseTimeTH_, glSampledPoseTimeTH_);
-        nh_.param("gmm_positional_variance", gmmPositionalVariance_, gmmPositionalVariance_);
-        nh_.param("gmm_angular_variance", gmmAngularVariance_, gmmAngularVariance_);
-        nh_.param("pred_dist_unif_rate", predDistUnifRate_, predDistUnifRate_);
+        this->declare_parameter<bool>("use_gl_pose_sampler", useGLPoseSampler_);
+        this->get_parameter("use_gl_pose_sampler", useGLPoseSampler_);
+
+        this->declare_parameter<bool>("fuse_gl_pose_sampler_only_unreliable", fuseGLPoseSamplerOnlyUnreliable_);
+        this->get_parameter("fuse_gl_pose_sampler_only_unreliable", fuseGLPoseSamplerOnlyUnreliable_);
+
+        this->declare_parameter<double>("gl_sampled_pose_time_th", glSampledPoseTimeTH_);
+        this->get_parameter("gl_sampled_pose_time_th", glSampledPoseTimeTH_);
+
+        this->declare_parameter<double>("gmm_positional_variance", gmmPositionalVariance_);
+        this->get_parameter("gmm_positional_variance", gmmPositionalVariance_);
+
+        this->declare_parameter<double>("gmm_angular_variance", gmmAngularVariance_);
+        this->get_parameter("gmm_angular_variance", gmmAngularVariance_);
+
+        this->declare_parameter<double>("pred_dist_unif_rate", predDistUnifRate_);
+        this->get_parameter("pred_dist_unif_rate", predDistUnifRate_);
 
         // write pose
-        nh_.param("write_pose", writePose_, writePose_);
-        nh_.param("pose_log_file", poseLogFile_, poseLogFile_);
+        this->declare_parameter<bool>("write_pose", writePose_);
+        this->get_parameter("write_pose", writePose_);
+
+        this->declare_parameter<std::string>("pose_log_file", poseLogFile_);
+        this->get_parameter("pose_log_file", poseLogFile_);
 
         // other parameters
-        nh_.param("localization_hz", localizationHz_, localizationHz_);
-        nh_.param("transform_tolerance", transformTolerance_, transformTolerance_);
+        this->declare_parameter<double>("localization_hz", localizationHz_);
+        this->get_parameter("localization_hz", localizationHz_);
+
+        this->declare_parameter<double>("transform_tolerance", transformTolerance_);
+        this->get_parameter("transform_tolerance", transformTolerance_);
+
+        this->declare_parameter<bool>("start_mcl", startMCL_);
+        this->get_parameter("start_mcl", startMCL_);
+
+        RCLCPP_INFO(this->get_logger(), "  scan_name: %s", scanName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  odom_name: %s", odomName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  map_name: %s", mapName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  pose_name: %s", poseName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  particles_name: %s", particlesName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  unknown_scan_name: %s", unknownScanName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  residual_errors_name: %s", residualErrorsName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  reliability_name: %s", reliabilityName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  gl_sampled_poses_name: %s", glSampledPosesName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  laser_frame: %s", laserFrame_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  base_link_frame: %s", baseLinkFrame_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  map_frame: %s", mapFrame_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  odom_frame: %s", odomFrame_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  broadcast_tf: %s", broadcastTF_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "  use_odom_tf: %s", useOdomTF_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "Initial pose and particle filter parameters:");
+        RCLCPP_INFO(this->get_logger(), "  initial_pose_x: %.3f", initialPoseX_);
+        RCLCPP_INFO(this->get_logger(), "  initial_pose_y: %.3f", initialPoseY_);
+        RCLCPP_INFO(this->get_logger(), "  initial_pose_yaw: %.3f", initialPoseYaw_);
+        RCLCPP_INFO(this->get_logger(), "  initial_noise_x: %.3f", initialNoiseX_);
+        RCLCPP_INFO(this->get_logger(), "  initial_noise_y: %.3f", initialNoiseY_);
+        RCLCPP_INFO(this->get_logger(), "  initial_noise_yaw: %.3f", initialNoiseYaw_);
+        RCLCPP_INFO(this->get_logger(), "  particle_num: %d", particlesNum_);
+        RCLCPP_INFO(this->get_logger(), "  use_augmented_mcl: %s", useAugmentedMCL_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "  add_random_particles_in_resampling: %s", addRandomParticlesInResampling_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "  random_particles_rate: %.3f", randomParticlesRate_);
+        RCLCPP_INFO(this->get_logger(), "  random_particles_noise:");
+        for (size_t i = 0; i < randomParticlesNoise_.size(); ++i) {
+            RCLCPP_INFO(this->get_logger(), "    [%zu]: %.3f", i, randomParticlesNoise_[i]);
+        }
+        RCLCPP_INFO(this->get_logger(), "  odom_noise_ddm:");
+        for (size_t i = 0; i < odomNoiseDDM_.size(); ++i) {
+            RCLCPP_INFO(this->get_logger(), "    [%zu]: %.3f", i, odomNoiseDDM_[i]);
+        }
+        RCLCPP_INFO(this->get_logger(), "  odom_noise_odm:");
+        for (size_t i = 0; i < odomNoiseODM_.size(); ++i) {
+            RCLCPP_INFO(this->get_logger(), "    [%zu]: %.3f", i, odomNoiseODM_[i]);
+        }
+        RCLCPP_INFO(this->get_logger(), "  use_omni_directional_model: %s", useOmniDirectionalModel_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "  measurement_model_type: %d", measurementModelType_);
+        RCLCPP_INFO(this->get_logger(), "  scan_step: %d", scanStep_);
+        RCLCPP_INFO(this->get_logger(), "  z_hit: %.3f", zHit_);
+        RCLCPP_INFO(this->get_logger(), "  z_short: %.3f", zShort_);
+        RCLCPP_INFO(this->get_logger(), "  z_max: %.3f", zMax_);
+        RCLCPP_INFO(this->get_logger(), "  z_rand: %.3f", zRand_);
+        RCLCPP_INFO(this->get_logger(), "  var_hit: %.3f", varHit_);
+        RCLCPP_INFO(this->get_logger(), "  lambda_short: %.3f", lambdaShort_);
+        RCLCPP_INFO(this->get_logger(), "  lambda_unknown: %.3f", lambdaUnknown_);
+        RCLCPP_INFO(this->get_logger(), "  known_class_prior: %.3f", pKnownPrior_);
+        RCLCPP_INFO(this->get_logger(), "  unknown_scan_prob_threshold: %.3f", unknownScanProbThreshold_);
+        RCLCPP_INFO(this->get_logger(), "  alpha_slow: %.3f", alphaSlow_);
+        RCLCPP_INFO(this->get_logger(), "  alpha_fast: %.3f", alphaFast_);
+        RCLCPP_INFO(this->get_logger(), "  reject_unknown_scan: %s", rejectUnknownScan_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "  publish_unknown_scan: %s", publishUnknownScan_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "  publish_residual_errors: %s", publishResidualErrors_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "  resample_threshold_ess: %.3f", resampleThresholdESS_);
+        RCLCPP_INFO(this->get_logger(), "  resample_thresholds:");
+        for (size_t i = 0; i < resampleThresholds_.size(); ++i) {
+            RCLCPP_INFO(this->get_logger(), "    [%zu]: %.3f", i, resampleThresholds_[i]);
+        }
+        RCLCPP_INFO(this->get_logger(), "  estimate_reliability: %s", estimateReliability_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "  rel_trans_ddm:");
+        for (size_t i = 0; i < relTransDDM_.size(); ++i) {
+            RCLCPP_INFO(this->get_logger(), "    [%zu]: %.3f", i, relTransDDM_[i]);
+        }
+        RCLCPP_INFO(this->get_logger(), "  rel_trans_odm:");
+        for (size_t i = 0; i < relTransODM_.size(); ++i) {
+            RCLCPP_INFO(this->get_logger(), "    [%zu]: %.3f", i, relTransODM_[i]);
+        }
+        RCLCPP_INFO(this->get_logger(), "  classifier_type: %d", classifierType_);
+        RCLCPP_INFO(this->get_logger(), "  mae_classifier_dir: %s", maeClassifierDir_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  use_gl_pose_sampler: %s", useGLPoseSampler_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "  fuse_gl_pose_sampler_only_unreliable: %s", fuseGLPoseSamplerOnlyUnreliable_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "  gl_sampled_pose_time_th: %.3f", glSampledPoseTimeTH_);
+        RCLCPP_INFO(this->get_logger(), "  gmm_positional_variance: %.3f", gmmPositionalVariance_);
+        RCLCPP_INFO(this->get_logger(), "  gmm_angular_variance: %.3f", gmmAngularVariance_);
+        RCLCPP_INFO(this->get_logger(), "  pred_dist_unif_rate: %.3f", predDistUnifRate_);
+        RCLCPP_INFO(this->get_logger(), "  write_pose: %s", writePose_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "  pose_log_file: %s", poseLogFile_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  localization_hz: %.3f", localizationHz_);
+        RCLCPP_INFO(this->get_logger(), "  transform_tolerance: %.3f", transformTolerance_);
+        RCLCPP_INFO(this->get_logger(), "  start_mcl: %s", startMCL_ ? "true" : "false");
+
+        // set tf broadcaster
+        tfBroadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
+        tfBuffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
+        tfBuffer_->setUsingDedicatedThread(true);
+        tfListener_ = std::make_shared<tf2_ros::TransformListener>(*tfBuffer_, this, false);
 
         // set subscribers
-        scanSub_ = nh_.subscribe(scanName_, 10, &MCL::scanCB, this);
-        odomSub_ = nh_.subscribe(odomName_, 100, &MCL::odomCB, this);
-        mapSub_ = nh_.subscribe(mapName_, 1, &MCL::mapCB, this);
-        initialPoseSub_ = nh_.subscribe("/initialpose", 1, &MCL::initialPoseCB, this);
+        scanSub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
+            scanName_, 10, std::bind(&MCL::scanCB, this, std::placeholders::_1));
+        odomSub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+            odomName_, 100, std::bind(&MCL::odomCB, this, std::placeholders::_1));
+        mapSub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
+            mapName_, 1, std::bind(&MCL::mapCB, this, std::placeholders::_1));
+        initialPoseSub_ = this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+            "/initialpose", 1, std::bind(&MCL::initialPoseCB, this, std::placeholders::_1));
         if (useGLPoseSampler_)
-            glSampledPosesPub_ = nh_.subscribe(glSampledPosesName_, 1, &MCL::glSampledPosesCB, this);
+            glSampledPosesSub_ = this->create_subscription<geometry_msgs::msg::PoseArray>(
+                glSampledPosesName_, 1, std::bind(&MCL::glSampledPosesCB, this, std::placeholders::_1));
 
         // set publishers
-        posePub_ = nh_.advertise<geometry_msgs::PoseStamped>(poseName_, 1);
-        particlesPub_ = nh_.advertise<geometry_msgs::PoseArray>(particlesName_, 1);
+        posePub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
+            poseName_, 1);
+        particlesPub_ = this->create_publisher<geometry_msgs::msg::PoseArray>(
+            particlesName_, 1);
         if (publishUnknownScan_)
-            unknownScanPub_ = nh_.advertise<sensor_msgs::LaserScan>(unknownScanName_, 1);
+            unknownScanPub_ = this->create_publisher<sensor_msgs::msg::LaserScan>(
+                unknownScanName_, 1);
         if (publishResidualErrors_)
-            residualErrorsPub_ = nh_.advertise<sensor_msgs::LaserScan>(residualErrorsName_, 1);
+            residualErrorsPub_ = this->create_publisher<sensor_msgs::msg::LaserScan>(
+                residualErrorsName_, 1);
         if (estimateReliability_) {
-            reliabilityPub_ = nh_.advertise<geometry_msgs::Vector3Stamped>(reliabilityName_, 1);
-            reliabilityMarkerPub_ = nh_.advertise<visualization_msgs::Marker>(reliabilityMarkerName_, 1);
+            reliabilityPub_ = this->create_publisher<geometry_msgs::msg::Vector3Stamped>(
+                reliabilityName_, 1);
+            reliabilityMarkerPub_ = this->create_publisher<visualization_msgs::msg::Marker>(
+                reliabilityMarkerName_, 1);
         }
 
         // degree to radian
@@ -386,68 +637,64 @@ public:
         deltaX_ = deltaY_ = deltaDist_ = deltaYaw_ = 0.0;
 
         // get the relative pose from the base link to the laser from the tf tree
-        ros::Rate loopRate(10);
-        tf::StampedTransform tfBaseLink2Laser;
-        int tfFailedCnt = 0;
-        while (ros::ok()) {
-            ros::spinOnce();
+        int cnt = 0;
+        rclcpp::Rate rate(10);
+        while (rclcpp::ok()) {
+            rclcpp::spin_some(this->get_node_base_interface());
             try {
-                ros::Time now = ros::Time::now();
-                tfListener_.waitForTransform(baseLinkFrame_, laserFrame_, now, ros::Duration(2.0));
-                tfListener_.lookupTransform(baseLinkFrame_, laserFrame_, now, tfBaseLink2Laser);
+                geometry_msgs::msg::TransformStamped tfStamped =
+                    tfBuffer_->lookupTransform(
+                        baseLinkFrame_, laserFrame_, tf2::TimePointZero,
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds(2)));
+                tf2::Quaternion quat;
+                tf2::fromMsg(tfStamped.transform.rotation, quat);
+                double roll, pitch, yaw;
+                tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
+                baseLink2Laser_.setX(tfStamped.transform.translation.x);
+                baseLink2Laser_.setY(tfStamped.transform.translation.y);
+                baseLink2Laser_.setYaw(yaw);
                 break;
-            } catch (tf::TransformException ex) {
-                tfFailedCnt++;
-                if (tfFailedCnt >= 300) {
-                    ROS_ERROR("Cannot get the relative pose from the base link to the laser from the tf tree."
+            } catch (tf2::TransformException &ex) {
+                cnt++;
+                if (cnt >= 300) {
+                    RCLCPP_ERROR(this->get_logger(), "Cannot get the relative pose from the base link to the laser from the tf tree."
                         " Did you set the static transform publisher between %s to %s?",
                         baseLinkFrame_.c_str(), laserFrame_.c_str());
-                    exit(1);
+                    rclcpp::shutdown();
+                    return;
                 }
-                loopRate.sleep();
             }
+            rate.sleep();
         }
-        tf::Quaternion quatBaseLink2Laser(tfBaseLink2Laser.getRotation().x(),
-            tfBaseLink2Laser.getRotation().y(),
-            tfBaseLink2Laser.getRotation().z(),
-            tfBaseLink2Laser.getRotation().w());
-        double baseLink2LaserRoll, baseLink2LaserPitch, baseLink2LaserYaw;
-        tf::Matrix3x3 rotMatBaseLink2Laser(quatBaseLink2Laser);
-        rotMatBaseLink2Laser.getRPY(baseLink2LaserRoll, baseLink2LaserPitch, baseLink2LaserYaw);
-        baseLink2Laser_.setX(tfBaseLink2Laser.getOrigin().x());
-        baseLink2Laser_.setY(tfBaseLink2Laser.getOrigin().y());
-        baseLink2Laser_.setYaw(baseLink2LaserYaw);
 
         // check map
-        int mapFailedCnt = 0;
-        while (ros::ok()) {
-            ros::spinOnce();
-            if (gotMap_)
-                break;
-            mapFailedCnt++;
-            if (mapFailedCnt >= 300) {
-                ROS_ERROR("Cannot get a map message."
-                    " Did you pulish the map?"
-                    " Expected map topic name is %s\n", mapName_.c_str());
-                exit(1);
+        cnt = 0;
+        while (rclcpp::ok()) {
+            rclcpp::spin_some(this->get_node_base_interface());
+            if (gotMap_) break;
+            cnt++;
+            if (cnt >= 300) {
+                RCLCPP_ERROR(this->get_logger(), "A map message might not be published.");
+                rclcpp::shutdown();
+                return;
             }
-            loopRate.sleep();
+            rate.sleep();
         }
 
         // check scan
-        int scanFailedCnt = 0;
-        while (ros::ok()) {
-            ros::spinOnce();
-            if (gotScan_)
-                break;
-            scanFailedCnt++;
-            if (scanFailedCnt >= 300) {
-                ROS_ERROR("Cannot get a scan message."
-                    " Did you pulish the scan?"
+        cnt = 0;
+        while (rclcpp::ok()) {
+            rclcpp::spin_some(this->get_node_base_interface());
+            if (gotScan_) break;
+            cnt++;
+            if (cnt >= 300) {
+                RCLCPP_ERROR(this->get_logger(), "Cannot get a scan message."
+                    " Did you publish the scan?"
                     " Expected scan topic name is %s\n", scanName_.c_str());
-                exit(1);
+                rclcpp::shutdown();
+                return;
             }
-            loopRate.sleep();
+            rate.sleep();
         }
 
         // reliability estimation
@@ -460,9 +707,10 @@ public:
                 maeClassifier_.readClassifierParams();
                 maes_.resize(particlesNum_);
             } else {
-                ROS_ERROR("Incorrect classifier type was selected."
+                RCLCPP_ERROR(this->get_logger(), "Incorrect classifier type was selected."
                     " The expected type is 0, but %d was selected.", classifierType_);
-                exit(1);
+                rclcpp::shutdown();
+                return;
             }
         }
 
@@ -474,7 +722,33 @@ public:
         measurementModelInvalidScan_ = zMax_ + zRand_ * pRand_;
 
         isInitialized_ = true;
-        ROS_INFO("MCL is ready to perform\n");
+        RCLCPP_INFO(this->get_logger(), "MCL is ready to perform\n");
+
+        // set timer
+        if (startMCL_) {
+            timer_ = this->create_wall_timer(
+                std::chrono::milliseconds((int)(1000.0 / localizationHz_)),
+                std::bind(&MCL::timerCB, this));
+        }
+    }
+
+    void timerCB() {
+        updateParticlesByMotionModel();
+        setCanUpdateScan(false);
+        calculateLikelihoodsByMeasurementModel();
+        calculateLikelihoodsByDecisionModel();
+        calculateGLSampledPosesLikelihood();
+        calculateAMCLRandomParticlesRate();
+        calculateEffectiveSampleSize();
+        estimatePose();
+        resampleParticles();
+        // plotScan();
+        // plotWorld(50.0);
+        publishROSMessages();
+        broadcastTF();
+        // plotLikelihoodMap();
+        setCanUpdateScan(true);
+        printResult();
     }
 
     void updateParticlesByMotionModel(void) {
@@ -685,7 +959,7 @@ public:
         }
 
         glParticlesNum_ = (int)glSampledPoses_.poses.size();
-        double dt = fabs(mclPoseStamp_.toSec() - glSampledPosesStamp_.toSec());
+        double dt = fabs(mclPoseStamp_.seconds() - glSampledPosesStamp_.seconds());
         if (dt > glSampledPoseTimeTH_ || glParticlesNum_ == 0 || !isGLSampledPosesUpdated_)
             return;
 
@@ -702,13 +976,12 @@ public:
         }
 
         for (int i = 0; i < glParticlesNum_; ++i) {
-            tf::Quaternion q(glSampledPoses_.poses[i].orientation.x, 
+            tf2::Quaternion q(glSampledPoses_.poses[i].orientation.x, 
                 glSampledPoses_.poses[i].orientation.y, 
                 glSampledPoses_.poses[i].orientation.z,
                 glSampledPoses_.poses[i].orientation.w);
             double roll, pitch, yaw;
-            tf::Matrix3x3 m(q);
-            m.getRPY(roll, pitch, yaw);
+            tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
             glParticles_[i].setPose(glSampledPoses_.poses[i].position.x, glSampledPoses_.poses[i].position.y, yaw);
 
             double sensorX = xo * cos(yaw) - yo * sin(yaw) + glParticles_[i].getX();
@@ -905,7 +1178,7 @@ public:
         mclPose_.setPose(x, y, yaw);
 
         if (writePose_)
-            fprintf(fp, "%lf %lf %lf %lf\n", mclPoseStamp_.toSec(), x, y, yaw);
+            fprintf(fp, "%lf %lf %lf %lf\n", mclPoseStamp_.seconds(), x, y, yaw);
     }
 
     void resampleParticles(void) {
@@ -1096,27 +1369,31 @@ public:
 
     void publishROSMessages(void) {
         // pose
-        geometry_msgs::PoseStamped pose;
+        geometry_msgs::msg::PoseStamped pose;
         pose.header.frame_id = mapFrame_;
         pose.header.stamp = mclPoseStamp_;
         pose.pose.position.x = mclPose_.getX();
         pose.pose.position.y = mclPose_.getY();
-        pose.pose.orientation = tf::createQuaternionMsgFromYaw(mclPose_.getYaw());
-        posePub_.publish(pose);
+        tf2::Quaternion q;
+        q.setRPY(0.0, 0.0, mclPose_.getYaw());
+        pose.pose.orientation = tf2::toMsg(q);
+        posePub_->publish(pose);
 
         // particles
-        geometry_msgs::PoseArray particlesPoses;
+        geometry_msgs::msg::PoseArray particlesPoses;
         particlesPoses.header.frame_id = mapFrame_;
         particlesPoses.header.stamp = mclPoseStamp_;
         particlesPoses.poses.resize(particlesNum_);
         for (int i = 0; i < particlesNum_; ++i) {
-            geometry_msgs::Pose pose;
+            geometry_msgs::msg::Pose pose;
             pose.position.x = particles_[i].getX();
             pose.position.y = particles_[i].getY();
-            pose.orientation = tf::createQuaternionMsgFromYaw(particles_[i].getYaw());
+            tf2::Quaternion q;
+            q.setRPY(0.0, 0.0, particles_[i].getYaw());
+            pose.orientation = tf2::toMsg(q);
             particlesPoses.poses[i] = pose;
         }
-        particlesPub_.publish(particlesPoses);
+        particlesPub_->publish(particlesPoses);
 
         // unknown scan
         if (publishUnknownScan_ && (rejectUnknownScan_ || measurementModelType_ == 2)) {
@@ -1124,19 +1401,19 @@ public:
                 Pose mlPose = particles_[maxLikelihoodParticleIdx_].getPose();
                 estimateUnknownScanWithClassConditionalMeasurementModel(mlPose);
             }
-            unknownScanPub_.publish(unknownScan_);
+            unknownScanPub_->publish(unknownScan_);
         }
 
         // residual errors
         if (publishResidualErrors_) {
-            sensor_msgs::LaserScan residualErrors = scan_;
+            sensor_msgs::msg::LaserScan residualErrors = scan_;
             residualErrors.intensities = getResidualErrors<float>(mclPose_);
-            residualErrorsPub_.publish(residualErrors);
+            residualErrorsPub_->publish(residualErrors);
         }
 
         // reliability
         if (estimateReliability_) {
-            geometry_msgs::Vector3Stamped reliability;
+            geometry_msgs::msg::Vector3Stamped reliability;
             reliability.header.stamp = mclPoseStamp_;
             reliability.vector.x = reliability_;
             if (classifierType_ == 0) {
@@ -1148,15 +1425,15 @@ public:
                 reliability.vector.y = mae;
                 reliability.vector.z = maeClassifier_.getFailureThreshold();
             }
-            reliabilityPub_.publish(reliability);
+            reliabilityPub_->publish(reliability);
 
-            visualization_msgs::Marker marker;
+            visualization_msgs::msg::Marker marker;
             marker.header.frame_id = mapFrame_;
             marker.header.stamp = mclPoseStamp_;
             marker.ns = "reliability_marker_namespace";
             marker.id = 0;
-            marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
-            marker.action = visualization_msgs::Marker::ADD;
+            marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+            marker.action = visualization_msgs::msg::Marker::ADD;
             marker.pose.position.x = mclPose_.getX();
             marker.pose.position.y = mclPose_.getY() - 3.0;
             marker.pose.position.z = 0.0;
@@ -1170,7 +1447,7 @@ public:
             marker.color.b = 1.0;
             if (reliability_ < 0.9)
                 marker.color.r = marker.color.g = 0.0;
-            reliabilityMarkerPub_.publish(marker);
+            reliabilityMarkerPub_->publish(marker);
         }
     }
 
@@ -1178,42 +1455,46 @@ public:
         if (!broadcastTF_)
             return;
 
-        geometry_msgs::Pose poseOnMap;
+        geometry_msgs::msg::Pose poseOnMap;
         poseOnMap.position.x = mclPose_.getX();
         poseOnMap.position.y = mclPose_.getY();
         poseOnMap.position.z = 0.0;
-        poseOnMap.orientation = tf::createQuaternionMsgFromYaw(mclPose_.getYaw());
+        tf2::Quaternion q;
+        q.setRPY(0.0, 0.0, mclPose_.getYaw());
+        poseOnMap.orientation = tf2::toMsg(q);
         tf2::Transform map2baseTrans;
         tf2::convert(poseOnMap, map2baseTrans);
 
+        rclcpp::Time transformExpiration = this->now() + rclcpp::Duration::from_seconds(transformTolerance_);
+
         if (useOdomTF_) {
-            geometry_msgs::Pose poseOnOdom;
+            geometry_msgs::msg::Pose poseOnOdom;
             poseOnOdom.position.x = odomPose_.getX();
             poseOnOdom.position.y = odomPose_.getY();
             poseOnOdom.position.z = 0.0;
-            poseOnOdom.orientation = tf::createQuaternionMsgFromYaw(odomPose_.getYaw());
+            tf2::Quaternion q;
+            q.setRPY(0.0, 0.0, odomPose_.getYaw());
+            poseOnOdom.orientation = tf2::toMsg(q);
             tf2::Transform odom2baseTrans;
             tf2::convert(poseOnOdom, odom2baseTrans);
 
             tf2::Transform map2odomTrans = map2baseTrans * odom2baseTrans.inverse();
             // add transform_tolerance: send a transform that is good up until a tolerance time so that odom can be used
             // ros::Time transformExpiration = (mclPoseStamp_ + ros::Duration(transformTolerance_));
-            ros::Time transformExpiration = (ros::Time::now() + ros::Duration(transformTolerance_));
-            geometry_msgs::TransformStamped map2odomStampedTrans;
+            geometry_msgs::msg::TransformStamped map2odomStampedTrans;
             map2odomStampedTrans.header.stamp = transformExpiration;
             map2odomStampedTrans.header.frame_id = mapFrame_;
             map2odomStampedTrans.child_frame_id = odomFrame_;
             tf2::convert(map2odomTrans, map2odomStampedTrans.transform);
-            tfBroadcaster_.sendTransform(map2odomStampedTrans);
+            tfBroadcaster_->sendTransform(map2odomStampedTrans);
         } else {
             // ros::Time transformExpiration = (mclPoseStamp_ + ros::Duration(transformTolerance_));
-            ros::Time transformExpiration = (ros::Time::now() + ros::Duration(transformTolerance_));
-            geometry_msgs::TransformStamped map2baseStampedTrans;
+            geometry_msgs::msg::TransformStamped map2baseStampedTrans;
             map2baseStampedTrans.header.stamp = transformExpiration;
             map2baseStampedTrans.header.frame_id = mapFrame_;
             map2baseStampedTrans.child_frame_id = baseLinkFrame_;
             tf2::convert(map2baseTrans, map2baseStampedTrans.transform);
-            tfBroadcaster_.sendTransform(map2baseStampedTrans);
+            tfBroadcaster_->sendTransform(map2baseStampedTrans);
         }
     }
 
@@ -1438,16 +1719,16 @@ private:
         *y = dy + mapOrigin_.getY();
     }
 
-    void scanCB(const sensor_msgs::LaserScan::ConstPtr &msg) {
+    void scanCB(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
         if (canUpdateScan_)
             scan_ = *msg;
         if (!gotScan_)
             gotScan_ = true;
     }
 
-    void odomCB(const nav_msgs::Odometry::ConstPtr &msg) {
+    void odomCB(const nav_msgs::msg::Odometry::SharedPtr msg) {
         static double prevTime;
-        double currTime = msg->header.stamp.toSec();
+        double currTime = rclcpp::Time(msg->header.stamp).seconds();
         if (isInitialized_) {
             prevTime = currTime;
             isInitialized_ = false;
@@ -1468,19 +1749,18 @@ private:
             deltaYaw_ -= 2.0 * M_PI;
         deltaTimeSum_ += deltaTime;
 
-        tf::Quaternion q(msg->pose.pose.orientation.x, 
+        tf2::Quaternion q(msg->pose.pose.orientation.x, 
             msg->pose.pose.orientation.y, 
             msg->pose.pose.orientation.z,
             msg->pose.pose.orientation.w);
         double roll, pitch, yaw;
-        tf::Matrix3x3 m(q);
-        m.getRPY(roll, pitch, yaw);
+        tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
         odomPose_.setPose(msg->pose.pose.position.x, msg->pose.pose.position.y, yaw);
 
         prevTime = currTime;
     }
 
-    void mapCB(const nav_msgs::OccupancyGrid::ConstPtr &msg) {
+    void mapCB(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
         // perform distance transform to build the distance field
         mapWidth_ = msg->info.width;
         mapHeight_ = msg->info.height;
@@ -1505,27 +1785,25 @@ private:
             }
         }
         distMap_ = distMap;
-        tf::Quaternion q(msg->info.origin.orientation.x, 
+        tf2::Quaternion q(msg->info.origin.orientation.x, 
             msg->info.origin.orientation.y, 
             msg->info.origin.orientation.z,
             msg->info.origin.orientation.w);
         double roll, pitch, yaw;
-        tf::Matrix3x3 m(q);
-        m.getRPY(roll, pitch, yaw);
+        tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
         mapOrigin_.setX(msg->info.origin.position.x);
         mapOrigin_.setY(msg->info.origin.position.y);
         mapOrigin_.setYaw(yaw);
         gotMap_ = true;
     }
 
-    void initialPoseCB(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr &msg) {
-        tf::Quaternion q(msg->pose.pose.orientation.x, 
+    void initialPoseCB(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg) {
+        tf2::Quaternion q(msg->pose.pose.orientation.x, 
             msg->pose.pose.orientation.y, 
             msg->pose.pose.orientation.z,
             msg->pose.pose.orientation.w);
         double roll, pitch, yaw;
-        tf::Matrix3x3 m(q);
-        m.getRPY(roll, pitch, yaw);
+        tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
         mclPose_.setPose(msg->pose.pose.position.x, msg->pose.pose.position.y, yaw);
         resetParticlesDistribution();
         if (estimateReliability_)
@@ -1533,7 +1811,7 @@ private:
         isInitialized_ = true;
     }
 
-    void glSampledPosesCB(const geometry_msgs::PoseArray::ConstPtr &msg) {
+    void glSampledPosesCB(const geometry_msgs::msg::PoseArray::SharedPtr msg) {
         if (canUpdateGLSampledPoses_) {
             glSampledPosesStamp_ = msg->header.stamp;
             glSampledPoses_ = *msg;

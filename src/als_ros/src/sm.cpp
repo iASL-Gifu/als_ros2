@@ -17,38 +17,12 @@
  * @author Naoki Akai
  ****************************************************************************/
 
-#include <ros/ros.h>
 #include <als_ros/SM.h>
 
 int main(int argc, char **argv) {
-    ros::init(argc, argv, "mcl");
+        rclcpp::init(argc, argv);
+        rclcpp::spin(std::make_shared<als_ros::MCL>());
 
-    als_ros::MCL mcl;
-    double localizationHz = mcl.getLocalizationHz();
-    ros::Rate loopRate(localizationHz);
-
-    while (ros::ok()) {
-        ros::spinOnce();
-//        mcl.updateParticlesByMotionModel();
-        mcl.setCanUpdateScan(false);
-//        mcl.scanMatching();
-        mcl.scanMatching2();
-//        mcl.calculateLikelihoodsByMeasurementModel();
-//        mcl.calculateLikelihoodsByDecisionModel();
-//        mcl.calculateGLSampledPosesLikelihood();
-//        mcl.calculateAMCLRandomParticlesRate();
-//        mcl.calculateEffectiveSampleSize();
-//        mcl.estimatePose();
-//        mcl.resampleParticles();
-//        mcl.plotScan();
-        mcl.plotWorld(10.0);
-//        mcl.publishROSMessages();
-        mcl.broadcastTF();
-//        mcl.plotLikelihoodMap();
-        mcl.setCanUpdateScan(true);
-//        mcl.printResult();
-        loopRate.sleep();
-    }
-
-    return 0;
+        rclcpp::shutdown();
+        return 0;
 }

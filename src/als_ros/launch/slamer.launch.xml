@@ -1,0 +1,22 @@
+<!-- slamer.launch -->
+<launch >
+    <arg name="slamer_yaml_file" default="$(find-pkg-share als_ros2)/config/slamer.yaml" />
+    <arg name="mcl_yaml_file" default="$(find-pkg-share als_ros2)/config/mcl.yaml" />
+    <arg name="start_mcl" default="false" />
+
+    <!-- YAML file of an indoor semantic map (ism) -->
+    <arg name="ism_yaml_file" default="$(find-pkg-share als_ros2)/config/ism.yaml" />
+
+    <!-- SLAMER node -->
+    <!--
+        厳密にはSLAMではなく、Localizationに特化したのノード
+        ISMという意味地図（物体にdoorやfenceなどのラベルがついている地図）を使用する
+        点の位置だけでなく、それがなにかを考慮することで、より精度の高い自己位置推定を実現する
+        ただし、ISMの作成が必要
+    -->
+    <node pkg="als_ros2" name="slamer" exec="slamer" output="screen" args="$(var ism_yaml_file)" >
+        <param from="$(var mcl_yaml_file)" />
+        <param from="$(var slamer_yaml_file)" />
+        <param name="start_mcl" value="$(var start_mcl)" />
+    </node>
+</launch >

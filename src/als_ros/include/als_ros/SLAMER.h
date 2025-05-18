@@ -20,10 +20,11 @@
 #ifndef __SLAMER_H__
 #define __SLAMER_H__
 
-#include <ros/ros.h>
-#include <sensor_msgs/LaserScan.h>
-#include <sensor_msgs/PointCloud2.h>
-#include <visualization_msgs/Marker.h>
+#include <rclcpp/rclcpp.hpp>
+#include <std_msgs/msg/color_rgba.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <visualization_msgs/msg/marker.hpp>
 #include <pcl/io/pcd_io.h>
 #include <pcl/point_types.h>
 #include <string>
@@ -38,8 +39,10 @@
 namespace als_ros {
 
 class SLAMER : public MCL {
-    ros::NodeHandle nh_;
-    ros::Publisher ismPointsPub_, coloredScanPointsPub_, lineObjectsPub_, spatialLineObjectsPub_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr ismPointsPub_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr coloredScanPointsPub_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr lineObjectsPub_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr spatialLineObjectsPub_;
     std::string ismPointsName_, coloredScanPointsName_, lineObjectsName_, spatialLineObjectsName_;
     bool publishISMPoints_, publishColoredScanPoints_;
 
@@ -49,14 +52,15 @@ class SLAMER : public MCL {
 
     double normConstHit_, denomHit_, zHit_, measurementModelRandom_;
 
-    sensor_msgs::LaserScan scan_;
+    sensor_msgs::msg::LaserScan scan_;
     LineObjectRecognition recog_;
     std::vector<LineObject> lineObjects_, spatialLineObjects_;
     std::vector<std::vector<double>> lineObjectsProbs_, spatialLineObjectsProbs_;
 
+    rclcpp::TimerBase::SharedPtr timer_;
+
 public:
-    SLAMER(std::string ismYamlFile):
-        nh_("~"),
+    SLAMER(std::string ismYamlFile) : MCL(),
         ismPointsName_("/ism_points"),
         coloredScanPointsName_("/slamer_colored_scan_points"),
         lineObjectsName_("/slamer_line_objects"),
@@ -64,43 +68,88 @@ public:
         publishISMPoints_(true),
         publishColoredScanPoints_(true)
     {
+        RCLCPP_INFO(this->get_logger(), "SLAMER is initializing...");
+        RCLCPP_INFO(this->get_logger(), "ism_yaml_file: %s", ismYamlFile.c_str());
+
         // slamer parameters
-        nh_.param("ism_points_name", ismPointsName_, ismPointsName_);
-        nh_.param("colored_scan_points_name", coloredScanPointsName_, coloredScanPointsName_);
-        nh_.param("line_objects_name", lineObjectsName_, lineObjectsName_);
-        nh_.param("spatial_line_objects_name", spatialLineObjectsName_, spatialLineObjectsName_);
-        nh_.param("publish_ism_points", publishISMPoints_, publishISMPoints_);
-        nh_.param("publish_colored_scan_points", publishColoredScanPoints_, publishColoredScanPoints_);
+        this->declare_parameter<std::string>("ism_points_name", ismPointsName_);
+        this->get_parameter("ism_points_name", ismPointsName_);
+
+        this->declare_parameter<std::string>("colored_scan_points_name", coloredScanPointsName_);
+        this->get_parameter("colored_scan_points_name", coloredScanPointsName_);
+
+        this->declare_parameter<std::string>("line_objects_name", lineObjectsName_);
+        this->get_parameter("line_objects_name", lineObjectsName_);
+
+        this->declare_parameter<std::string>("spatial_line_objects_name", spatialLineObjectsName_);
+        this->get_parameter("spatial_line_objects_name", spatialLineObjectsName_);
+
+        this->declare_parameter<bool>("publish_ism_points", publishISMPoints_);
+        this->get_parameter("publish_ism_points", publishISMPoints_);
+
+        this->declare_parameter<bool>("publish_colored_scan_points", publishColoredScanPoints_);
+        this->get_parameter("publish_colored_scan_points", publishColoredScanPoints_);
+
 
         // scan feature parameters
         double scanRangeMax, scanMapReso, scanOrientationHistReso, minScanOrientationProb;
         double minSpatialLineObjectLength, maxSpatialLineObjectLength, mergePointsDist;
-        nh_.param("scan_range_max", scanRangeMax, 20.0);
-        nh_.param("scan_map_reso", scanMapReso, 0.05);
-        nh_.param("scan_orientation_hist_reso", scanOrientationHistReso, 5.0);
-        nh_.param("min_scan_orientation_prob", minScanOrientationProb, 0.1);
-        nh_.param("min_spatial_line_object_length", minSpatialLineObjectLength, 0.5);
-        nh_.param("max_spatial_line_object_length", maxSpatialLineObjectLength, 2.5);
-        nh_.param("merge_points_dist", mergePointsDist, 0.5);
+        this->declare_parameter<double>("scan_range_max", 20.0);
+        this->get_parameter("scan_range_max", scanRangeMax);
+
+        this->declare_parameter<double>("scan_map_reso", 0.05);
+        this->get_parameter("scan_map_reso", scanMapReso);
+
+        this->declare_parameter<double>("scan_orientation_hist_reso", 5.0);
+        this->get_parameter("scan_orientation_hist_reso", scanOrientationHistReso);
+
+        this->declare_parameter<double>("min_scan_orientation_prob", 0.1);
+        this->get_parameter("min_scan_orientation_prob", minScanOrientationProb);
+
+        this->declare_parameter<double>("min_spatial_line_object_length", 0.5);
+        this->get_parameter("min_spatial_line_object_length", minSpatialLineObjectLength);
+
+        this->declare_parameter<double>("max_spatial_line_object_length", 2.5);
+        this->get_parameter("max_spatial_line_object_length", maxSpatialLineObjectLength);
+
+        this->declare_parameter<double>("merge_points_dist", 0.5);
+        this->get_parameter("merge_points_dist", mergePointsDist);
+
+        RCLCPP_INFO(this->get_logger(), "  ism_points_name: %s", ismPointsName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  colored_scan_points_name: %s", coloredScanPointsName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  line_objects_name: %s", lineObjectsName_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  spatial_line_objects_name: %s", spatialLineObjectsName_.c_str());
+
+        RCLCPP_INFO(this->get_logger(), "  publish_ism_points: %s", publishISMPoints_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "  publish_colored_scan_points: %s", publishColoredScanPoints_ ? "true" : "false");
+
+        RCLCPP_INFO(this->get_logger(), "  scan_range_max: %.2f", scanRangeMax);
+        RCLCPP_INFO(this->get_logger(), "  scan_map_reso: %.2f", scanMapReso);
+        RCLCPP_INFO(this->get_logger(), "  scan_orientation_hist_reso: %.2f", scanOrientationHistReso);
+        RCLCPP_INFO(this->get_logger(), "  min_scan_orientation_prob: %.2f", minScanOrientationProb);
+        RCLCPP_INFO(this->get_logger(), "  min_spatial_line_object_length: %.2f", minSpatialLineObjectLength);
+        RCLCPP_INFO(this->get_logger(), "  max_spatial_line_object_length: %.2f", maxSpatialLineObjectLength);
+        RCLCPP_INFO(this->get_logger(), "  merge_points_dist: %.2f", mergePointsDist);
+
         scanOrientationHistReso *= M_PI / 180.0;
 
         // publisher
         if (publishISMPoints_)
-            ismPointsPub_ = nh_.advertise<sensor_msgs::PointCloud2>(ismPointsName_, 1, this);
+            ismPointsPub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(ismPointsName_, 1);
         if (publishColoredScanPoints_)
-            coloredScanPointsPub_ = nh_.advertise<sensor_msgs::PointCloud2>(coloredScanPointsName_, 1);
-        lineObjectsPub_ = nh_.advertise<visualization_msgs::Marker>(lineObjectsName_, 1);
-        spatialLineObjectsPub_ = nh_.advertise<visualization_msgs::Marker>(spatialLineObjectsName_, 1);
+            coloredScanPointsPub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(coloredScanPointsName_, 1);
+        lineObjectsPub_ = this->create_publisher<visualization_msgs::msg::Marker>(lineObjectsName_, 1);
+        spatialLineObjectsPub_ = this->create_publisher<visualization_msgs::msg::Marker>(spatialLineObjectsName_, 1);
 
         // ism
         ism_.readISM(ismYamlFile);
         objectNames_ = ism_.getObjectNames();
         mapResolution_ = ism_.getMapResolution();
         if (publishISMPoints_) {
-            sensor_msgs::PointCloud2 ismPointsMsg = ism_.getISMPointsAsPC2();
+            sensor_msgs::msg::PointCloud2 ismPointsMsg = ism_.getISMPointsAsPC2();
             ismPointsMsg.header.frame_id = getMapFrame();
-            ismPointsMsg.header.stamp = ros::Time::now();
-            ismPointsPub_.publish(ismPointsMsg);
+            ismPointsMsg.header.stamp = this->now();
+            ismPointsPub_->publish(ismPointsMsg);
         }
 
         // slamer parameters used in mcl
@@ -111,13 +160,38 @@ public:
 
         // line object recognizer
         recog_.init(scanRangeMax, scanMapReso, scanOrientationHistReso, minScanOrientationProb, minSpatialLineObjectLength, maxSpatialLineObjectLength, mergePointsDist);
+
+        timer_ = this->create_wall_timer(
+            std::chrono::milliseconds(static_cast<int>(1000.0 / getLocalizationHz())),
+            std::bind(&SLAMER::timerCB, this)
+        );
+    }
+
+    void timerCB() {
+        updateParticlesByMotionModel();
+        setCanUpdateScan(false);
+        calculateLikelihoodsByMeasurementModel();
+        calculateLikelihoodsBySLAMER();
+        recognizeObjectsWithMapAssist();
+        calculateLikelihoodsByDecisionModel();
+        calculateGLSampledPosesLikelihood();
+        calculateAMCLRandomParticlesRate();
+        calculateEffectiveSampleSize();
+        estimatePose();
+        resampleParticles();
+        publishROSMessages();
+        publishSLAMERROSMessages();
+        broadcastTF();
+        // plotLikelihoodMap();
+        setCanUpdateScan(true);
+        printResult();
     }
 
     void calculateLikelihoodsBySLAMER(void) {
         scan_ = getScan();
         recog_.recognizeLineObjects(scan_, lineObjects_, lineObjectsProbs_, spatialLineObjects_, spatialLineObjectsProbs_);
         if ((int)lineObjects_.size() == 0) {
-            ROS_INFO("Likelihood calculation with SLAMER is ignored since actual line objects were not detected.");
+            RCLCPP_INFO(this->get_logger(), "Likelihood calculation with SLAMER is ignored since actual line objects were not detected.");
             return;
         }
 
@@ -245,18 +319,18 @@ public:
 
     void publishSLAMERROSMessages(void) {
         if (publishColoredScanPoints_) {
-            sensor_msgs::PointCloud2 coloredScanImgPoints = recog_.getColoredScanImgPoints(lineObjects_, lineObjectsProbs_);
+            sensor_msgs::msg::PointCloud2 coloredScanImgPoints = recog_.getColoredScanImgPoints(lineObjects_, lineObjectsProbs_);
             coloredScanImgPoints.header = scan_.header;
-            coloredScanPointsPub_.publish(coloredScanImgPoints);
+            coloredScanPointsPub_->publish(coloredScanImgPoints);
         }
 
-        visualization_msgs::Marker lineObjects, spatialLineObjects;
+        visualization_msgs::msg::Marker lineObjects, spatialLineObjects;
         lineObjects.header = scan_.header;
         lineObjects.ns = "slamer_line_objects";
-        lineObjects.lifetime = ros::Duration();
+        lineObjects.lifetime = rclcpp::Duration::from_seconds(0.0);
         lineObjects.frame_locked = true;
-        lineObjects.type = visualization_msgs::Marker::LINE_LIST;
-        lineObjects.action = visualization_msgs::Marker::ADD;
+        lineObjects.type = visualization_msgs::msg::Marker::LINE_LIST;
+        lineObjects.action = visualization_msgs::msg::Marker::ADD;
         lineObjects.scale.x = 0.2;
         lineObjects.scale.y = 0.0;
         lineObjects.scale.z = 0.0;
@@ -276,7 +350,7 @@ public:
             double pOthers = lineObjectsProbs_[i][(int)LineObjectLabel::OTHERS];
             // printf("%d: %lf, %lf, %lf, %lf\n", i, pCloseDoor, pCloseGlassDoor, pFence, pOthers);
 
-            std_msgs::ColorRGBA color;
+            std_msgs::msg::ColorRGBA color;
             color.a = 1.0;
             if (pOthers > pCloseDoor && pOthers > pCloseGlassDoor && pOthers > pFence) {
                 // recog_.getObjectColor((int)LineObjectLabel::OTHERS, color.r, color.g, color.b);
@@ -293,7 +367,7 @@ public:
 
             als_ros::Point lp1 = lineObjects_[i].getP1();
             als_ros::Point lp2 = lineObjects_[i].getP2();
-            geometry_msgs::Point p1, p2;
+            geometry_msgs::msg::Point p1, p2;
             p1.x = lp1.getX();
             p1.y = lp1.getY();
             p2.x = lp2.getX();
@@ -315,7 +389,7 @@ public:
             double pOthers = spatialLineObjectsProbs_[i][(int)LineObjectLabel::OTHERS];
             // printf("%d: %lf, %lf, %lf, %lf, %lf, %lf %lf\n", i, pOpenDoor, pOpenGlassDoor, pFence, pCloseGlassDoor, pNoEntryLine, pFreeSpace, pOthers);
 
-            std_msgs::ColorRGBA color;
+            std_msgs::msg::ColorRGBA color;
             color.a = 0.5;
             if (pFreeSpace > pOpenDoor && pFreeSpace > pOpenGlassDoor && pFreeSpace > pCloseGlassDoor && pFreeSpace > pFence && pFreeSpace > pNoEntryLine && pFreeSpace > pOthers) {
                 // recog_.getObjectColor((int)LineObjectLabel::FREE_SPACE, color.r, color.g, color.b);
@@ -339,7 +413,7 @@ public:
 
             als_ros::Point lp1 = spatialLineObjects_[i].getP1();
             als_ros::Point lp2 = spatialLineObjects_[i].getP2();
-            geometry_msgs::Point p1, p2;
+            geometry_msgs::msg::Point p1, p2;
             p1.x = lp1.getX();
             p1.y = lp1.getY();
             p2.x = lp2.getX();
@@ -351,8 +425,8 @@ public:
             spatialLineObjects.colors.push_back(color);
         }
 
-        lineObjectsPub_.publish(lineObjects);
-        spatialLineObjectsPub_.publish(spatialLineObjects);
+        lineObjectsPub_->publish(lineObjects);
+        spatialLineObjectsPub_->publish(spatialLineObjects);
     }
 
 private:

@@ -1,0 +1,5 @@
+/**:
+  ros__parameters:
+    node_name: scan2pc
+    scan_name: "/scan"
+    scan_points_name: "/scan_points"

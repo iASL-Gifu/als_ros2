@@ -1,0 +1,9 @@
+<!-- scan2pc.launch -->
+<launch>
+    <arg name="yaml_file" default="$(find-pkg-share als_ros2)/config/scan2pc.yaml" />
+
+    <!-- LaserScanをPointCloudに変換 -->
+    <node pkg="als_ros2" name="scan2pc" exec="scan2pc" output="screen">
+            <param from="$(var yaml_file)" />
+    </node>
+</launch>

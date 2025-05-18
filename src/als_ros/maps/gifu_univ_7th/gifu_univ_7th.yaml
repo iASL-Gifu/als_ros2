@@ -1,0 +1,9 @@
+free_thresh: 0.25
+image: gifu_univ_7th.png
+negate: 0
+occupied_thresh: 0.65
+origin:
+- -24.6
+- -12.2
+- 0
+resolution: 0.05
