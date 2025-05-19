@@ -60,7 +60,7 @@
         <param name="map_name" value="$(var map_name)" />
         <param name="scan_name" value="$(var scan_name)" />
         <param name="odom_name" value="$(var odom_name)" />
-        <param name="poses_name" value="$(var gl_sampled_poses_name)" />
+        <param name="gl_sampled_poses_name" value="$(var gl_sampled_poses_name)" />
         <param name="local_map_name" value="$(var local_map_name)" />
         <param name="sdf_keypoints_name" value="$(var sdf_keypoints_name)" />
         <param name="local_sdf_keypoints_name" value="$(var local_sdf_keypoints_name)" />
@@ -69,6 +69,5 @@
         <param name="base_link_frame" value="$(var base_link_frame)" />
         <param name="laser_frame" value="$(var laser_frame)" />
         <param name="residual_errors_name" value="$(var residual_errors_name)" />
-        <param name="marker_frame" value="$(var base_link_frame)" />
     </node>
 </launch>

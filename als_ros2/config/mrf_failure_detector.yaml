@@ -1,7 +1,7 @@
 /**:
   ros__parameters:
     node_name: mrf_failure_detector
-    residual_errors_name: "/residual_errors"
+    # residual_errors_name: "/residual_errors"
     failure_probability_name: "/failure_probability"
     aligned_scan_mrf: "/aligned_scan_mrf"
     misaligned_scan_mrf: "/misaligned_scan_mrf"
@@ -9,7 +9,7 @@
     publish_classified_scans: true
     failure_probability_marker_name: "/failure_probability_marker_name"
     publish_failure_probability_marker: true
-    marker_frame: base_link
+    # marker_frame: base_link
     normal_distribution_mean: 0.0
     normal_distribution_var: 0.01
     exponential_distribution_lambda: 2.0

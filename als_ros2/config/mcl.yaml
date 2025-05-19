@@ -1,24 +1,24 @@
 /**:
   ros__parameters:
     node_name: "mcl"
-    scan_name: "/scan"
-    odom_name: "/odom"
-    map_name: "/map"
+    # map_name: "/map"
+    # scan_name: "/scan"
+    # odom_name: "/odom"
+    # gl_sampled_poses_name: "/gl_sampled_poses"
+    # local_map_name: "/gl_local_map"
+    # sdf_keypoints_name: "/gl_sdf_keypoints"
+    # local_sdf_keypoints_name: "/gl_local_sdf_keypoints"
+    # map_frame: "map"
+    # odom_frame: "odom"
+    # base_link_frame: "base_link"
+    # laser_frame: "laser"
+    # residual_errors_name: "/residual_errors"
     pose_name: "/mcl_pose"
     particles_name: "/mcl_particles"
     unknown_scan_name: "/unknown_scan"
-    residual_errors_name: "/residual_errors"
     reliability_marker_name: "/reliability_marker_name"
-    gl_sampled_poses_name: "/gl_sampled_poses"
-    local_map_name: "/gl_local_map"
-    sdf_keypoints_name: "/gl_sdf_keypoints"
-    local_sdf_keypoints_name: "/gl_local_sdf_keypoints"
-    laser_frame: "laser"
-    base_link_frame: "base_link"
-    map_frame: "map"
-    odom_frame: "odom"
     broadcast_tf: true
-    use_odom_tf: true
+    use_odom_tf: false
     initial_pose_x: 0.0
     initial_pose_y: 0.0
     initial_pose_yaw: 0.0
@@ -46,18 +46,16 @@
     lambda_unknown: 0.01
     known_class_prior: 0.5
     resample_threshold_ess: 0.5
-    estimate_reliability: false
+    estimate_reliability: true
     classifier_type: 0
     mae_classifier_dir: "/home/apollo-22/als_ros2/src/als_ros/classifiers/MAE/gifu_univ_7th/"
     mae_max_residual_error: 0.5
     mae_histrogram_bin_width: 0.05
-    use_gl_pose_sampler: false
     fuse_gl_pose_sampler_only_unreliable: false
     gl_sampled_pose_time_th: 1.0
     gmm_positional_variance: 0.01
     gmm_angular_variance: 0.01
     pred_dist_unif_rate: 0.05
-    use_mrf_failure_detector: false
     write_pose: true
     pose_log_file: "/tmp/als_ros2_pose.txt"
     localization_hz: 10.0

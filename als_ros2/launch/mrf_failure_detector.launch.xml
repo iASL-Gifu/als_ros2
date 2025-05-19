@@ -1,6 +1,8 @@
 <!-- mrf_failure_detector.launch -->
 <launch >
       <arg name="yaml_file" default="$(find-pkg-share als_ros2)/config/mrf_failure_detector.yaml" />
+      <arg name="residual_errors_name" default="/residual_errors" />
+      <arg name="marker_frame" default="base_link" />
 
       <!-- Failure detector node -->
       <!--
@@ -10,5 +12,7 @@
       -->
       <node pkg="als_ros2" name="mrf_failure_detector" exec="mrf_failure_detector" output="screen">
             <param from="$(var yaml_file)" />
+            <param name="residual_errors_name" value="$(var residual_errors_name)" />
+            <param name="marker_frame" value="$(var marker_frame)" />
       </node>
 </launch >
